@@ -3,27 +3,62 @@ unit Parser;
 interface
 
 uses
-  System.SysUtils, System.Classes, System.Generics.Defaults, System.Generics.Collections,
-  Parser.Dictionary, Parser.Exception, Parser.Language, Parser.Lexer, Parser.Package, Parser.Syntax;
+  System.SysUtils, System.Classes, System.Generics.Defaults, System.Generics.Collections, System.Rtti,
+  Parser.Dictionary, Parser.Exception, Parser.Language, Parser.Lexer, Parser.Package, Parser.Syntax, Parser.Exporter;
 
 type
-  TParserExpressionKind = (exEmpty, exTerm, exResolution, exDeclConstant, exDeclVariable, exDeclFunction, exDeclAlias, exDeletion);
+  TParserExpressionKind = (exEmpty, exTerm, exResolution, exDeclConstant, exDeclVariable, exDeclFunction, exDeclAlias, exShow, exDeletion);
 
-  TParserResponse = record
-    Warnings: TArray<String>;
-    case ExpressionKind: TParserExpressionKind of
-      exTerm: (
-        Value: Double;
-      );
-      exResolution: (
-        Name: TParserNameChars;
-      );
+  TParserExpressionKindHelper = record helper for TParserExpressionKind
+  public
+    constructor Create(const AFirstToken: TParserToken);
   end;
 
+  TParserValueKind = (vkNone, vkDouble, vkString, vkStringArray);
+
+  TParserValue = record
+  private
+    FValue: TValue;
+    function GetKind: TParserValueKind;
+    function GetAsDouble: Double;
+    function GetAsString: String;
+    function GetAsStringArray: TArray<String>;
+  public
+    property Kind: TParserValueKind read GetKind;
+    property AsDouble: Double read GetAsDouble;
+    property AsString: String read GetAsString;
+    property AsStringArray: TArray<String> read GetAsStringArray;
+    constructor Create(const AValue: Double); overload;
+    constructor Create(const AValue: String); overload;
+    constructor Create(const AValue: TArray<String>); overload;
+    function ToString(const APretty: Boolean = False): String;
+  end;
+
+  TParserResponse = record
+  private
+    FWarnings: TArray<String>;
+    FExpressionKind: TParserExpressionKind;
+    FReturnValue: TParserValue;
+  public
+    property Warnings: TArray<String> read FWarnings;
+    property ExpressionKind: TParserExpressionKind read FExpressionKind;
+    property ReturnValue: TParserValue read FReturnValue;
+  end;
+
+  TParser = class;
+
   TParserNameData = record
-    RelativeName: String;
-    PackageName: String;
-    Dictionary: TParserDictionary;
+  private
+    FRelativeName: String;
+    FPackageName: String;
+    FDictionary: TParserDictionary;
+    function GetAbsoluteName: String;
+  public
+    property RelativeName: String read FRelativeName;
+    property PackageName: String read FPackageName;
+    property Dictionary: TParserDictionary read FDictionary;
+    property AbsoluteName: String read GetAbsoluteName;
+    constructor Create(const AParser: TParser; const AName: String);
   end;
 
   TParser = class(TSingletonImplementation, IParserValueSupplier)
@@ -41,8 +76,6 @@ type
     property MinArgCount[const AName: String]: Integer read GetMinArgCount;
     property MaxArgCount[const AName: String]: Integer read GetMaxArgCount;
     function ContainsValue(const AName: String): Boolean;
-    function NameData(const AName: String): TParserNameData; virtual;
-    function AbsoluteName(const AName: String): String; virtual;
   public
     property Dictionary: TParserDictionary read FDictionary;
     property Packages[const AName: String]: TParserPackage read GetPackages;
@@ -57,29 +90,238 @@ type
 
 implementation
 
-{ TParser }
+{ TParserExpressionKindHelper }
 
-function TParser.AbsoluteName(const AName: String): String;
-var
-  LNameData: TParserNameData;
+constructor TParserExpressionKindHelper.Create(const AFirstToken: TParserToken);
 begin
-  LNameData := NameData(AName);
-  if not LNameData.Dictionary.Contains(LNameData.RelativeName) then
-  begin
-    raise EParserUnknownError.CreateFmt('Undeclared identifier: %s', [AName.QuotedString]);
-  end;
-  Result := LNameData.RelativeName;
-  if not LNameData.PackageName.IsEmpty then
-  begin
-    Result := String.Join('.', [LNameData.PackageName, Result]);
+  case AFirstToken.Kind of
+    tkEnd:
+      begin
+        Self := exEmpty;
+      end;
+    tkName:
+      begin
+        case TParserKeyword.Create(AFirstToken.Name) of
+          kwResolve:
+            begin
+              Self := exResolution;
+            end;
+          kwConstant:
+            begin
+              Self := exDeclConstant;
+            end;
+          kwVariable:
+            begin
+              Self := exDeclVariable;
+            end;
+          kwFunction:
+            begin
+              Self := exDeclFunction;
+            end;
+          kwAlias:
+            begin
+              Self := exDeclAlias;
+            end;
+          kwShow:
+            begin
+              Self := exShow;
+            end;
+          kwDelete:
+            begin
+              Self := exDeletion;
+            end
+          else
+            begin
+              Self := exTerm;
+            end;
+        end;
+      end;
+    else
+      begin
+        Self := exTerm;
+      end;
   end;
 end;
+
+{ TParserValue }
+
+constructor TParserValue.Create(const AValue: TArray<String>);
+begin
+  FValue := TValue.From<TArray<String>>(AValue);
+end;
+
+constructor TParserValue.Create(const AValue: String);
+begin
+  FValue := TValue.From<String>(AValue);
+end;
+
+constructor TParserValue.Create(const AValue: Double);
+begin
+  FValue := TValue.From<Double>(AValue);
+end;
+
+function TParserValue.GetAsDouble: Double;
+begin
+  Result := FValue.AsType<Double>;
+end;
+
+function TParserValue.GetAsString: String;
+begin
+  Result := FValue.AsType<String>;
+end;
+
+function TParserValue.GetAsStringArray: TArray<String>;
+begin
+  Result := FValue.AsType<TArray<String>>;
+end;
+
+function TParserValue.GetKind: TParserValueKind;
+begin
+  if FValue.IsType<Double> then
+  begin
+    Result := vkDouble;
+  end else
+  begin
+    if FValue.IsType<String> then
+    begin
+      Result := vkString;
+    end else
+    begin
+      if FValue.IsType<TArray<String>> then
+      begin
+        Result := vkStringArray;
+      end else
+      begin
+        Result := Default(TParserValueKind);
+      end;
+    end;
+  end;
+end;
+
+function TParserValue.ToString(const APretty: Boolean): String;
+begin
+  case Kind of
+    vkNone:
+      begin
+        Result := String.Empty;
+      end;
+    vkDouble:
+      begin
+        if AsDouble.IsNan then
+        begin
+          if APretty then
+          begin
+            Result := 'Invalid number';
+          end else
+          begin
+            Result := 'NaN';
+          end;
+        end else
+        begin
+          if AsDouble.IsNegativeInfinity then
+          begin
+            if APretty then
+            begin
+              Result := 'Negative infinity';
+            end else
+            begin
+              Result := '-Inf';
+            end;
+          end else
+          begin
+            if AsDouble.IsPositiveInfinity then
+            begin
+              if APretty then
+              begin
+                Result := 'Positive infinity';
+              end else
+              begin
+                Result := 'Inf';
+              end;
+            end else
+            begin
+              Result := AsDouble.ToString(TFormatSettings.Invariant);
+            end;
+          end;
+        end;
+      end;
+    vkString:
+      begin
+        Result := AsString;
+      end;
+    vkStringArray:
+      begin
+        Result := String.Join(sLineBreak, AsStringArray);
+      end;
+  end;
+end;
+
+{ TParserNameData }
+
+constructor TParserNameData.Create(const AParser: TParser; const AName: String);
+var
+  LNamePath: TArray<String>;
+  LPackage: TParserPackage;
+  LPackageIndex: Integer;
+begin
+  LNamePath := AName.Split(['.']);
+  FRelativeName := LNamePath[High(LNamePath)];
+  if Length(LNamePath) > 1 then
+  begin
+    FPackageName := LNamePath[Low(LNamePath)];
+    if AParser.FPackages.TryGetValue(PackageName, LPackage) then
+    begin
+      FPackageName := LPackage.Name;
+      FDictionary := LPackage.Dictionary;
+    end else
+    begin
+      FDictionary := Default(TParserDictionary);
+    end;
+    Dictionary.Dealias(FRelativeName);
+    Dictionary.Prettify(FRelativeName);
+  end else
+  begin
+    if not AParser.Dictionary.Contains(FRelativeName) then
+    begin
+      for LPackageIndex := Pred(AParser.PackageCount) downto 0 do
+      begin
+        LPackage := AParser.Packages[AParser.FOrderedPackageNames[LPackageIndex]];
+        if not LPackage.Explicit and LPackage.Dictionary.Contains(RelativeName) then
+        begin
+          FPackageName := LPackage.Name;
+          FDictionary := LPackage.Dictionary;
+          Dictionary.Dealias(FRelativeName);
+          Dictionary.Prettify(FRelativeName);
+          Exit;
+        end;
+      end;
+    end;
+    FPackageName := String.Empty;
+    FDictionary := AParser.Dictionary;
+    if Dictionary.Dealias(FRelativeName) then
+    begin
+      Create(AParser, RelativeName);
+    end;
+    Dictionary.Prettify(FRelativeName);
+  end;
+end;
+
+function TParserNameData.GetAbsoluteName: String;
+begin
+  Result := RelativeName;
+  if not PackageName.IsEmpty then
+  begin
+    Result := String.Join('.', [PackageName, Result]);
+  end;
+end;
+
+{ TParser }
 
 function TParser.ContainsValue(const AName: String): Boolean;
 var
   LNameData: TParserNameData;
 begin
-  LNameData := NameData(AName);
+  LNameData := TParserNameData.Create(Self, AName);
   Result := Assigned(LNameData.Dictionary) and LNameData.Dictionary.Contains(LNameData.RelativeName);
 end;
 
@@ -116,53 +358,6 @@ var
     end;
   end;
 
-  procedure DetermineKind;
-  begin
-    case LToken.Kind of
-      tkEnd:
-        begin
-          Result.ExpressionKind := exEmpty;
-        end;
-      tkName:
-        begin
-          case TParserKeyword.Create(LToken.Name) of
-            kwResolve:
-              begin
-                Result.ExpressionKind := exResolution;
-              end;
-            kwConstant:
-              begin
-                Result.ExpressionKind := exDeclConstant;
-              end;
-            kwVariable:
-              begin
-                Result.ExpressionKind := exDeclVariable;
-              end;
-            kwFunction:
-              begin
-                Result.ExpressionKind := exDeclFunction;
-              end;
-            kwAlias:
-              begin
-                Result.ExpressionKind := exDeclAlias;
-              end;
-            kwDelete:
-              begin
-                Result.ExpressionKind := exDeletion;
-              end
-            else
-              begin
-                Result.ExpressionKind := exTerm;
-              end;
-          end;
-        end;
-      else
-        begin
-          Result.ExpressionKind := exTerm;
-        end;
-    end;
-  end;
-
   procedure EvaluateExpression;
   var
     LSyntaxTree: TParserTree;
@@ -171,6 +366,9 @@ var
     LInitialValue: Double;
     LFunct: TParserCustomFunction;
     LFunctParams: TStringList;
+    LExportTarget: TStringList;
+    LExporter: TParserCodeExporter;
+    LNameData: TParserNameData;
 
     procedure BuildTree;
     var
@@ -290,26 +488,6 @@ var
       until LToken.Kind <> tkSymbolComma;
     end;
 
-    function AbsoluteNameChars(const AName: String): TParserNameChars;
-    var
-      LAbsoluteName: String;
-      LCharIndex: Integer;
-      LChar: Char;
-    begin
-      LAbsoluteName := AbsoluteName(AName);
-      LCharIndex := Low(TParserNameChars);
-      for LChar in LAbsoluteName do
-      begin
-        if LCharIndex > High(TParserNameChars) then
-        begin
-          LWarnings.Add('Resolved name exceeds the maximum length for display')
-        end;
-        Result[LCharIndex] := LChar;
-        Inc(LCharIndex);
-      end;
-      FillChar(Result[LCharIndex], Length(Result) - LCharIndex, #0);
-    end;
-
   begin
     case Result.ExpressionKind of
       exTerm:
@@ -317,7 +495,7 @@ var
           LSyntaxTree := TParserTree.Create([Self]);
           try
             BuildTree;
-            Result.Value := LSyntaxTree.Calculate;
+            Result.FReturnValue := TParserValue.Create(LSyntaxTree.Calculate);
           finally
             LSyntaxTree.Free;
           end;
@@ -326,7 +504,7 @@ var
         begin
           ExpectToken([tkName]);
           LObjectName := LToken.Name;
-          Result.Name := AbsoluteNameChars(LObjectName);
+          Result.FReturnValue := TParserValue.Create(TParserNameData.Create(Self, LObjectName).AbsoluteName);
           ExpectToken([tkEnd]);
         end;
       exDeclConstant:
@@ -427,6 +605,22 @@ var
             LObjectNames.Free;
           end;
         end;
+      exShow:
+        begin
+          ExpectToken([tkName]);
+          LObjectName := LToken.Name;
+          LExportTarget := TStringList.Create;
+          LExporter := TParserCodeExporter.Create(LExportTarget);
+          try
+            LNameData := TParserNameData.Create(Self, LObjectName);
+            LExporter.Export(LNameData.Dictionary, LNameData.RelativeName);
+            Result.FReturnValue := TParserValue.Create(LExportTarget.ToStringArray);
+          finally
+            LExporter.Free;
+            LExportTarget.Free;
+          end;
+          ExpectToken([tkEnd]);
+        end;
       exDeletion:
         begin
           LObjectNames := TStringList.Create;
@@ -452,9 +646,9 @@ begin
   LLexer := TParserLexer.Create(AExpression);
   try
     ExpectToken([tkEnd, tkSymbolOp, tkSymbolParOp, tkSymbolParCl, tkNumberDec, tkNumberHex, tkName]);
-    DetermineKind;
+    Result.FExpressionKind := TParserExpressionKind.Create(LToken);
     EvaluateExpression;
-    Result.Warnings := LWarnings.ToStringArray;
+    Result.FWarnings := LWarnings.ToStringArray;
   finally
     LLexer.Free;
     LWarnings.Free;
@@ -465,7 +659,7 @@ function TParser.GetMaxArgCount(const AName: String): Integer;
 var
   LNameData: TParserNameData;
 begin
-  LNameData := NameData(AName);
+  LNameData := TParserNameData.Create(Self, AName);
   if not Assigned(LNameData.Dictionary) then
   begin
     raise EParserUnknownPackageError.CreateFmt('Unknown package: %s', [LNameData.PackageName.QuotedString]);
@@ -477,7 +671,7 @@ function TParser.GetMinArgCount(const AName: String): Integer;
 var
   LNameData: TParserNameData;
 begin
-  LNameData := NameData(AName);
+  LNameData := TParserNameData.Create(Self, AName);
   if not Assigned(LNameData.Dictionary) then
   begin
     raise EParserUnknownPackageError.CreateFmt('Unknown package: %s', [LNameData.PackageName.QuotedString]);
@@ -503,65 +697,17 @@ function TParser.GetValues(const AName: String; const AArgs: TArray<Double>): Do
 var
   LNameData: TParserNameData;
 begin
-  LNameData := NameData(AName);
+  LNameData := TParserNameData.Create(Self, AName);
   if not Assigned(LNameData.Dictionary) then
   begin
     raise EParserUnknownPackageError.CreateFmt('Unknown package: %s', [LNameData.PackageName.QuotedString]);
   end;
-  Result := LNameData.Dictionary[LNameData.RelativeName].Value[AArgs];
+  Result := (LNameData.Dictionary[LNameData.RelativeName] as TParserValueObject).Value[AArgs];
 end;
 
 function TParser.HasPackage(const AName: String): Boolean;
 begin
   Result := FPackages.ContainsKey(AName);
-end;
-
-function TParser.NameData(const AName: String): TParserNameData;
-var
-  LNamePath: TArray<String>;
-  LPackage: TParserPackage;
-  LPackageIndex: Integer;
-begin
-  LNamePath := AName.Split(['.']);
-  Result.RelativeName := LNamePath[High(LNamePath)];
-  if Length(LNamePath) > 1 then
-  begin
-    Result.PackageName := LNamePath[Low(LNamePath)];
-    if FPackages.TryGetValue(Result.PackageName, LPackage) then
-    begin
-      Result.PackageName := LPackage.Name;
-      Result.Dictionary := LPackage.Dictionary;
-    end else
-    begin
-      Result.Dictionary := Default(TParserDictionary);
-    end;
-    Result.Dictionary.Dealias(Result.RelativeName);
-    Result.Dictionary.Prettify(Result.RelativeName);
-  end else
-  begin
-    if not Dictionary.Contains(Result.RelativeName) then
-    begin
-      for LPackageIndex := Pred(PackageCount) downto 0 do
-      begin
-        LPackage := Packages[FOrderedPackageNames[LPackageIndex]];
-        if not LPackage.Explicit and LPackage.Dictionary.Contains(Result.RelativeName) then
-        begin
-          Result.PackageName := LPackage.Name;
-          Result.Dictionary := LPackage.Dictionary;
-          Result.Dictionary.Dealias(Result.RelativeName);
-          Result.Dictionary.Prettify(Result.RelativeName);
-          Exit;
-        end;
-      end;
-    end;
-    Result.PackageName := String.Empty;
-    Result.Dictionary := Dictionary;
-    if Result.Dictionary.Dealias(Result.RelativeName) then
-    begin
-      Result := NameData(Result.RelativeName);
-    end;
-    Result.Dictionary.Prettify(Result.RelativeName);
-  end;
 end;
 
 procedure TParser.RegisterPackage(const APackage: TParserPackage);

@@ -19,6 +19,7 @@ type
   TParserNameChars = array [Byte] of Char;
 
   TParserToken = record
+  public
     CharIndex: Integer;
     case Kind: TParserTokenKind of
       tkSymbolOp: (

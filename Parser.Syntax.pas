@@ -18,11 +18,14 @@ type
     property MaxArgCount[const AName: String]: Integer read GetMaxArgCount;
   end;
 
-  TParserKeyword = (kwNone = -1, kwResolve, kwConstant, kwVariable, kwFunction, kwAlias, kwDelete);
+  TParserKeyword = (kwNone = -1, kwResolve, kwConstant, kwVariable, kwFunction, kwAlias, kwShow, kwDelete);
 
   TParserKeywordHelper = record helper for TParserKeyword
+  private const
+    FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('resolve', 'const', 'var', 'function', 'alias', 'show', 'delete');
   public
     constructor Create(const AName: String);
+    function ToString: String;
   end;
 
   TParserOperator = (opAdd, opSub, opMul, opDiv, opMod, opExp);
@@ -130,7 +133,12 @@ implementation
 
 constructor TParserKeywordHelper.Create(const AName: String);
 begin
-  Self := TParserKeyword(IndexText(AName, ['RESOLVE', 'CONST', 'VAR', 'FUNCTION', 'ALIAS', 'DELETE']));
+  Self := TParserKeyword(IndexText(AName, FKeywords));
+end;
+
+function TParserKeywordHelper.ToString: String;
+begin
+  Result := FKeywords[Self];
 end;
 
 { TParserOperatorHelper }

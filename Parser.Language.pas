@@ -11,17 +11,22 @@ type
   private
     FName: String;
   protected
-    procedure AssignTo(Dest: TPersistent); override;
-    function GetValue(const AArgs: TArray<Double>): Double; virtual;
     function GetMinArgCount: Integer; virtual; abstract;
     function GetMaxArgCount: Integer; virtual; abstract;
   public
     class function ValidName(const AName: String): Boolean; // Must NOT be virtual, due to generic aliasing
     property Name: String read FName;
-    property Value[const AArgs: TArray<Double>]: Double read GetValue;
     property MinArgCount: Integer read GetMinArgCount;
     property MaxArgCount: Integer read GetMaxArgCount;
+    procedure AssignTo(Dest: TPersistent); override;
     constructor Create(const AName: String);
+  end;
+
+  TParserValueObject = class abstract(TParserObject)
+  protected
+    function GetValue(const AArgs: TArray<Double>): Double; virtual;
+  public
+    property Value[const AArgs: TArray<Double>]: Double read GetValue;
   end;
 
   IParserWritableObject = interface
@@ -30,7 +35,7 @@ type
     property Value: Double write SetValue;
   end;
 
-  TParserConstant = class(TParserObject)
+  TParserConstant = class(TParserValueObject)
   private
     FValue: Double;
   protected
@@ -52,7 +57,7 @@ type
     procedure SetValue(const AValue: Double); virtual;
   end;
 
-  TParserFunction = class abstract(TParserObject)
+  TParserFunction = class abstract(TParserValueObject)
   private
     FParams: TArray<String>;
     FVarArg: Boolean;
@@ -161,7 +166,14 @@ begin
   FName := AName;
 end;
 
-function TParserObject.GetValue(const AArgs: TArray<Double>): Double;
+class function TParserObject.ValidName(const AName: String): Boolean;
+begin
+  Result := IsValidIdent(AName) and (TParserKeyword.Create(AName) = kwNone);
+end;
+
+{ TParserValueObject }
+
+function TParserValueObject.GetValue(const AArgs: TArray<Double>): Double;
 begin
   if Length(AArgs) < MinArgCount then
   begin
@@ -176,11 +188,6 @@ begin
     raise EParserObjectArgCountError.Create('Too many parameters');   
   end;
   Result := Default(Double);
-end;
-
-class function TParserObject.ValidName(const AName: String): Boolean;
-begin
-  Result := IsValidIdent(AName) and (TParserKeyword.Create(AName) = kwNone);
 end;
 
 { TParserConstant }

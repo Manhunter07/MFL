@@ -161,6 +161,30 @@ begin
     begin
       Result := Mean(Params);
     end, True));
+  FDefaultPackage.Dictionary.Add(TParserStandardAnonReferenceFunction.Create('Compare', ['First', 'Second'],
+    function (Params: TArray<Double>): Double
+    begin
+      Result := CompareValue(Params[0], Params[1]);
+    end));
+  FDefaultPackage.Dictionary.Add(TParserStandardAnonReferenceFunction.Create('Mask', ['Output', 'Dummy'],
+    function (Params: TArray<Double>): Double
+    begin
+      Result := Params[0];
+    end, True));
+  FDefaultPackage.Dictionary.Add(TParserStandardAnonReferenceFunction.Create('Error', ['Code'],
+    function (Params: TArray<Double>): Double
+    var
+      LThisFunction: TParserStandardAnonReferenceFunction;
+    begin
+      LThisFunction := (FDefaultPackage.Dictionary['Error'] as TParserStandardAnonReferenceFunction);
+      LThisFunction.AssertInteger(Params, 0);
+      LThisFunction.AssertMin(Params, 0, 0);
+      if not IsZero(Params[0]) then
+      begin
+        raise EParserUserError.CreateFmt('Error code: %d', [Trunc(Params[0])]);
+      end;
+      Result := Default(Double);
+    end));
 end;
 
 destructor TParserPackage.Destroy;
@@ -252,7 +276,7 @@ begin
       LThisFunction.AssertMin(Params, 1, 0);
       ValidateAddressAndIndex(Trunc(Params[0]), Trunc(Params[1]));
       Memory[Trunc(Params[0])][Trunc(Params[1])] := Params[2];
-      Result := 0;
+      Result := Default(Double);
     end));
   Dictionary.Add(TParserStandardAnonReferenceFunction.Create('GetSize', ['Address'],
     function (Params: TArray<Double>): Double
@@ -278,7 +302,7 @@ begin
       LValues := Memory[Trunc(Params[0])];
       SetLength(LValues, Trunc(Params[1]));
       Memory[Trunc(Params[0])] := LValues;
-      Result := 0;
+      Result := Default(Double);
     end));
   Dictionary.AddAlias('Null', 'Nil');
 end;

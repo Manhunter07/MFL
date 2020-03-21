@@ -20,6 +20,7 @@ type
     property Count: Integer read GetCount;
     constructor Create;
     destructor Destroy; override;
+    function GetEnumerator: TEnumerator<TParserObject>;
     procedure Clear;
     procedure Add(const AObject: TParserObject);
     procedure AddAlias(const AAlias, AName: String);
@@ -121,6 +122,11 @@ end;
 function TParserDictionary.GetCount: Integer;
 begin
   Result := FObjects.Count;
+end;
+
+function TParserDictionary.GetEnumerator: TEnumerator<TParserObject>;
+begin
+  Result := FObjects.Values.GetEnumerator;
 end;
 
 function TParserDictionary.GetObjects(const AName: String): TParserObject;
