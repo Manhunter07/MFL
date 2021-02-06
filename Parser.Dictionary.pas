@@ -22,7 +22,7 @@ type
     destructor Destroy; override;
     function GetEnumerator: TEnumerator<TParserObject>;
     procedure Clear;
-    procedure Add(const AObject: TParserObject);
+    procedure Add(const AObject: TParserObject); overload;
     procedure AddAlias(const AAlias, AName: String);
     function Dealias(var AName: String): Boolean;
     procedure Remove(const AName: String);
@@ -36,9 +36,14 @@ implementation
 
 procedure TParserDictionary.Add(const AObject: TParserObject);
 begin
+  if AObject.Name.IsEmpty then
+  begin
+    // No anonymous types/functions
+    raise EParserObjectNameError.CreateFmt('Invalid name: %s', [AObject.Name.QuotedString]);
+  end;
   if Contains(AObject.Name) then
   begin
-    if not (Supports(AObject, IParserWritableObject) and Supports(Self[AObject.Name], IParserWritableObject)) then
+    if not (AObject.Writable and Self[AObject.Name].Writable) then
     begin
       raise EParserDictionaryDuplicateError.CreateFmt('Redeclared identifier: %s', [AObject.Name.QuotedString]);
     end;

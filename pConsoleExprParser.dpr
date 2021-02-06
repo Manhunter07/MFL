@@ -5,7 +5,8 @@ program pConsoleExprParser;
 {$R *.res}
 
 uses
-  System.SysUtils, System.Classes,
+  System.SysUtils,
+  System.Classes,
   Parser in 'Parser.pas',
   Parser.Syntax in 'Parser.Syntax.pas',
   Parser.Dictionary in 'Parser.Dictionary.pas',
@@ -13,11 +14,12 @@ uses
   Parser.Exception in 'Parser.Exception.pas',
   Parser.Lexer in 'Parser.Lexer.pas',
   Parser.Package in 'Parser.Package.pas',
-  Parser.Exporter in 'Parser.Exporter.pas';
+  Parser.Exporter in 'Parser.Exporter.pas',
+  Parser.Value in 'Parser.Value.pas';
 
 var
   Parser: TParser;
-  MemoryPackage: TParserMemoryPackage;
+//  MemoryPackage: TParserMemoryPackage;
   Expr: String;
   Response: TParserResponse;
   Warning: String;
@@ -25,9 +27,9 @@ label
   Query;
 begin
   Parser := TParser.Create;
-  MemoryPackage := TParserMemoryPackage.Create('Memory', True);
+//  MemoryPackage := TParserMemoryPackage.Create('Memory', True);
   try
-    Parser.RegisterPackage(MemoryPackage);
+//    Parser.RegisterPackage(MemoryPackage);
     Query:
       try
         Readln(Expr);
@@ -63,6 +65,6 @@ begin
     goto Query;
   finally
     Parser.Free;
-    MemoryPackage.Free;
+//    MemoryPackage.Free;
   end;
 end.

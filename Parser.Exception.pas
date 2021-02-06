@@ -8,9 +8,11 @@ uses
 type
   EParserError = class abstract(Exception);
 
-    EParserUnknownError = class(EParserError);
-
     EParserUnknownPackageError = class(EParserError);
+
+    EParserDuplicatePackageError = class(EParserError);
+
+    EParserNoTypeError = class(EParserError);
 
     EParserTokenUnexpectedError = class(EParserError);
 
@@ -18,7 +20,17 @@ type
 
     EParserCommaError = class(EParserError);
 
+    EParserEmptySectionError = class(EParserError);
+
+    EParserAssertionError = class(EParserError);
+
     EParserOperatorError = class(EParserError);
+
+    EParserOptionError = class(EParserError);
+
+    EParserMultiResultError = class(EParserError);
+
+    EParserAddressError = class abstract(EParserError);
 
     EParserUserError = class(EParserError);
 
@@ -26,13 +38,15 @@ type
 
       EParserLexerCharacterError = class(EParserLexerError);
 
-      EParserLexerTokenLengthError = class(EParserLexerError);
+      EParserLexerNumberFormatError = class(EParserLexerError);
 
       EParserLexerTokenIncomplete = class(EParserLexerError);
 
     EParserPackageError = class abstract(EParserError);
 
       EParserPackageNameError = class(EParserPackageError);
+
+      EParserConsoleError = class(EParserPackageError);
 
       EParserMemoryPackageError = class abstract(EParserPackageError);
 
@@ -54,11 +68,23 @@ type
 
       EParserObjectArgCountError = class(EParserObjectError);
 
+      EParserFunctionUnknownError = class(EParserObjectError);
+
       EParserFunctionParamNameError = class(EParserObjectError);
 
       EParserFunctionParamDuplicateError = class(EParserObjectError);
 
       EParserFunctionParamValueError = class(EParserObjectError);
+
+      EParserFunctionParamDefaultError = class(EParserObjectError);
+
+      EParserTypeNoConstructor = class(EParserObjectError);
+
+      EParserTypeNoDefault = class(EParserObjectError);
+
+      EParserTypeCompatibilityError = class(EParserObjectError);
+
+      EParserTypeUnknownError = class(EParserObjectError);
 
     EParserTreeError = class abstract(EParserError);
 
@@ -66,7 +92,19 @@ type
 
     EParserExportError = class abstract(EParserError);
 
-      EParserUnsupportedError = class(EParserError);
+      EParserExportUnsupportedError = class(EParserError);
+
+    EParserValueError = class abstract(EParserError);
+
+      EParserValueKindError = class(EParserValueError);
+
+      EParserValueMemberError = class(EParserValueError);
+
+      EParserValueComparisonError = class(EParserValueError);
+
+      EParserValueNegationError = class(EParserValueError);
+
+      EParserValueRefError = class(EParserValueError);
 
 implementation
 

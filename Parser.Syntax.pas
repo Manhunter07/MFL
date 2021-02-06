@@ -3,32 +3,40 @@ unit Parser.Syntax;
 interface
 
 uses
-  System.SysUtils, System.StrUtils, System.Math, System.Generics.Collections, System.Generics.Defaults,
-  Parser.Exception;
+  System.SysUtils, System.StrUtils, System.Math, System.Rtti, System.Generics.Collections, System.Generics.Defaults,
+  Parser.Exception, Parser.Value;
 
 type
-  IParserValueSupplier = interface
-    ['{4D63069F-53A6-4CEF-B69B-79BACE8D4698}']
-    function ContainsValue(const AName: String): Boolean;
-    function GetMinArgCount(const AName: String): Integer;
-    function GetMaxArgCount(const AName: String): Integer;
-    function GetValues(const AName: String; const AArgs: TArray<Double>): Double;
-    property Values[const AName: String; const AArgs: TArray<Double>]: Double read GetValues;
-    property MinArgCount[const AName: String]: Integer read GetMinArgCount;
-    property MaxArgCount[const AName: String]: Integer read GetMaxArgCount;
+  TParserNode = class;
+
+  TParserNodeKind = (nkNone, nkAbs, nkArgs, nkElements, nkFields, nkIf, nkThen, nkElse, nkTry, nkExcept);
+
+  TParserNodeKindHelper = record helper for TParserNodeKind
+  public
+    constructor Create(const ANode: TParserNode);
   end;
 
-  TParserKeyword = (kwNone = -1, kwResolve, kwConstant, kwVariable, kwFunction, kwAlias, kwShow, kwDelete);
+  TParserKeyword = (kwNone, kw_, kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwRange, kwEnum, kwInt, kwRangeInt, kwAttrib, kwAlias, kwShow, kwDelete, kwAssert, kwLink, kwSpread, kwIf, kwThen, kwElse, kwTry, kwExcept, kwFunc, kwRet);
+
+  TParserKeywords = set of TParserKeyword;
 
   TParserKeywordHelper = record helper for TParserKeyword
   private const
-    FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('resolve', 'const', 'var', 'function', 'alias', 'show', 'delete');
+    FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('_', 'resolve', 'const', 'var', 'inline', 'function', 'type', 'constructor', 'range', 'enum', 'int', 'rangeint', 'attrib', 'alias', 'show', 'delete', 'assert', 'link', 'spread', 'if', 'then', 'else', 'try', 'except', 'func', 'ret');
+    class function GetTypeConstructors: TParserKeywords; static;
+    class function GetExpressionStarters: TParserKeywords; static;
+    class function GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords; static;
   public
     constructor Create(const AName: String);
+    class property Allowed[const ANodeKind: TParserNodeKind]: TParserKeywords read GetAllowed;
+    class property ExpressionStarters: TParserKeywords read GetExpressionStarters;
+    class property TypeConstructors: TParserKeywords read GetTypeConstructors;
     function ToString: String;
   end;
 
-  TParserOperator = (opAdd, opSub, opMul, opDiv, opMod, opExp);
+  TParserTypeConstructor = (tcRange, tcEnum, tcInt, tcRangeInt, tcStr, tcArray, tcRecord);
+
+  TParserOperator = (opAdd, opSub, opRnd, opCmp, opMul, opDiv, opMod, opExp);
 
   TParserOperators = set of TParserOperator;
 
@@ -39,17 +47,22 @@ type
     class function GetOperators(const APrecedence: TParserOperatorPrecedence): TParserOperators; static;
     class function GetPrecedences(const AOperator: TParserOperator): TParserOperatorPrecedence; static;
     class function GetUnaryOperators: TParserOperators; static;
+    class function GetBinaryOperators: TParserOperators; static;
   public
     class property UnaryOperators: TParserOperators read GetUnaryOperators;
+    class property BinaryOperators: TParserOperators read GetBinaryOperators;
     class property Operators[const APrecedence: TParserOperatorPrecedence]: TParserOperators read GetOperators;
     class property Precedences[const AOperator: TParserOperator]: TParserOperatorPrecedence read GetPrecedences;
     constructor Create(const ASymbol: Char);
     function ToChar: Char;
-    function Invoke(const AFirst, ASecond: Double): Double; overload;
-    function Invoke(const AValue: Double): Double; overload;
+    function Invoke(const AFirst, ASecond: TParserValue): TParserValue; overload;
+    function Invoke(const AValue: TParserValue): TParserValue; overload;
+    function Supported(const AValue: TParserValue): Boolean; overload;
+    function Supported(const AFirst, ASecond: TParserValue): Boolean; overload;
   end;
 
   TParserParentNode = class;
+
   TParserTree = class;
 
   TParserNode = class abstract
@@ -58,13 +71,13 @@ type
     FParent: TParserParentNode;
     FOperator: TParserOperator;
   protected
-    function GetValue: Double; virtual; abstract;
+    function GetValue: TParserValue; virtual; abstract;
   public
     property SyntaxTree: TParserTree read FSyntaxTree;
     property Parent: TParserParentNode read FParent;
     property &Operator: TParserOperator read FOperator;
-    property Value: Double read GetValue;
-    constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator);
+    property Value: TParserValue read GetValue;
+    constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator); overload;
   end;
 
   TParserParentNode = class(TParserNode)
@@ -73,14 +86,21 @@ type
     function GetNodes(const AIndex: Integer): TParserNode;
     function GetCount: Integer;
   protected
-    function GetValue: Double; override;
+    function GetValue: TParserValue; override;
     procedure Add(const ANode: TParserNode);
+    function ChildrenValues: TArray<TParserValue>;
   public
     property Nodes[const AIndex: Integer]: TParserNode read GetNodes; default;
     property Count: Integer read GetCount;
     constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator);
     destructor Destroy; override;
     function GetEnumerator: TEnumerator<TParserNode>; inline;
+    procedure Clear;
+  end;
+
+  TParserAbsNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
   end;
 
   TParserRootNode = class(TParserParentNode)
@@ -92,48 +112,192 @@ type
   private
     FName: String;
   protected
-    function GetValue: Double; override;
-    function ChildrenValues: TArray<Double>;
+    function GetValue: TParserValue; override;
   public
     property Name: String read FName;
     constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AName: String);
   end;
 
+  TParserArrayNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
+  end;
+
+  TParserRecordNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
+    function ChildrenNames: TArray<String>;
+  end;
+
   TParserArgNode = class(TParserParentNode)
+  private
+    FSpread: Boolean;
   public
+    property Spread: Boolean read FSpread write FSpread;
     constructor Create(const AParent: TParserParentNode);
+  end;
+
+  TParserNamedArgNode = class(TParserArgNode)
+  private
+    FName: String;
+  public
+    property Name: String read FName;
+    constructor Create(const AParent: TParserParentNode; const AName: String);
   end;
 
   TParserValueNode = class(TParserNode)
   private
-    FValue: Double;
+    FValue: TParserValue;
   protected
-    function GetValue: Double; override;
+    function GetValue: TParserValue; override;
   public
-    constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AValue: Double);
+    constructor Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AValue: TParserValue);
   end;
+
+  TParserRefNode = class(TParserNode)
+  private
+    FName: String;
+  protected
+    function GetValue: TParserValue; override;
+  public
+    property Name: String read FName;
+    constructor Create(const AParent: TParserParentNode; const AName: String);
+  end;
+
+  TParserDeRefNode = class(TParserNamedNode)
+  protected
+    function GetValue: TParserValue; override;
+  public
+    constructor Create(const AParent: TParserParentNode; const AName: String);
+  end;
+
+  TParserIfNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
+  end;
+
+  TParserTryNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
+  end;
+
+  TParserFuncNode = class(TParserParentNode);
 
   TParserTree = class
   private
     FValueSuppliers: TArray<IParserValueSupplier>;
     FNodes: TParserParentNode;
-    function GetValues(const AName: String; const AArgs: TArray<Double>): Double;
+    function GetValues(const AName: String; const AArgs: TArray<TParserValue>): TParserValue;
+    function GetRefTargets(const AName: String): IParserValueRefTarget;
   protected
-    property Values[const AName: String; const AArgs: TArray<Double>]: Double read GetValues;
+    property Values[const AName: String; const AArgs: TArray<TParserValue>]: TParserValue read GetValues;
+    property RefTargets[const AName: String]: IParserValueRefTarget read GetRefTargets;
   public
     property Nodes: TParserParentNode read FNodes;
-    constructor Create(const AValueSuppliers: TArray<IParserValueSupplier>);
+    constructor Create(const AValueSuppliers: TArray<IParserValueSupplier> = []);
     destructor Destroy; override;
-    function Calculate: Double;
+    function GetEnumerator: TEnumerator<TParserNode>; inline;
+    function Calculate: TParserValue;
+    procedure Optimize;
   end;
 
 implementation
+
+{ TParserNodeKindHelper }
+
+{$WARN NO_RETVAL OFF}
+constructor TParserNodeKindHelper.Create(const ANode: TParserNode);
+var
+  LParent: TParserParentNode;
+begin
+  LParent := ANode.Parent;
+  if LParent is TParserAbsNode then
+  begin
+    Self := nkAbs;
+  end else
+  begin
+    if LParent is TParserNamedNode then
+    begin
+      Self := nkArgs;
+    end else
+    begin
+      if LParent is TParserArrayNode then
+      begin
+        Self := nkElements;
+      end else
+      begin
+        if LParent is TParserRecordNode then
+        begin
+           Self := nkFields;
+        end else
+        begin
+          if LParent is TParserIfNode then
+          begin
+            case LParent.FNodes.IndexOf(ANode) of
+              0:
+                begin
+                  Self := nkIf;
+                end;
+              1:
+                begin
+                  Self := nkThen;
+                end;
+              2:
+                begin
+                  Self := nkElse;
+                end;
+            end;
+          end else
+          begin
+            if LParent is TParserTryNode then
+            begin
+              case LParent.FNodes.IndexOf(ANode) of
+                0:
+                  begin
+                    Self := nkTry;
+                  end;
+                1:
+                  begin
+                    Self := nkExcept;
+                  end;
+              end;
+            end else
+            begin
+              Self := nkNone;
+            end;
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+{$WARN NO_RETVAL ON}
 
 { TParserKeywordHelper }
 
 constructor TParserKeywordHelper.Create(const AName: String);
 begin
-  Self := TParserKeyword(IndexText(AName, FKeywords));
+  Self := TParserKeyword(Succ(IndexText(AName, FKeywords)));
+end;
+
+class function TParserKeywordHelper.GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords;
+const
+  LAllowedKeywords: array [TParserNodeKind] of TParserKeywords = (
+    [kwIf, kwTry], [], [kwSpread], [], [], [kwThen], [kwElse], [], [kwExcept], []
+  );
+begin
+  Result := LAllowedKeywords[ANodeKind];
+  Include(Result, kwNone);
+end;
+
+class function TParserKeywordHelper.GetExpressionStarters: TParserKeywords;
+begin
+  Result := [kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwAlias, kwShow, kwDelete, kwAssert, kwLink];
+end;
+
+class function TParserKeywordHelper.GetTypeConstructors: TParserKeywords;
+begin
+  Result := [kwRange, kwEnum, kwInt, kwRangeInt];
 end;
 
 function TParserKeywordHelper.ToString: String;
@@ -155,6 +319,14 @@ begin
       begin
         Self := opSub;
       end;
+    '~':
+      begin
+        Self := opRnd;
+      end;
+    '?':
+      begin
+        Self := opCmp;
+      end;
     '*':
       begin
         Self := opMul;
@@ -175,76 +347,155 @@ begin
 end;
 {$WARN NO_RETVAL ON}
 
+class function TParserOperatorHelper.GetBinaryOperators: TParserOperators;
+begin
+  Result := [opAdd, opSub, opCmp, opMul, opDiv, opExp];
+end;
+
 class function TParserOperatorHelper.GetOperators(const APrecedence: TParserOperatorPrecedence): TParserOperators;
 const
-  LOperators: array [TParserOperatorPrecedence] of TParserOperators = ([opAdd, opSub], [opMul, opDiv, opMod], [opExp]);
+  LOperators: array [TParserOperatorPrecedence] of TParserOperators = ([opAdd, opSub, opRnd, opCmp], [opMul, opDiv, opMod], [opExp]);
 begin
   Result := LOperators[APrecedence];
 end;
 
 class function TParserOperatorHelper.GetPrecedences(const AOperator: TParserOperator): TParserOperatorPrecedence;
 const
-  LPrecedences: array [TParserOperator] of TParserOperatorPrecedence = (0, 0, 1, 1, 1, 2);
+  LPrecedences: array [TParserOperator] of TParserOperatorPrecedence = (0, 0, 0, 0, 1, 1, 1, 2);
 begin
   Result := LPrecedences[AOperator];
 end;
 
 class function TParserOperatorHelper.GetUnaryOperators: TParserOperators;
 begin
-  Result := [opAdd, opSub];
+  Result := [opAdd, opSub, opRnd, opCmp];
 end;
 
 {$WARN NO_RETVAL OFF}
-function TParserOperatorHelper.Invoke(const AValue: Double): Double;
+function TParserOperatorHelper.Invoke(const AValue: TParserValue): TParserValue;
 begin
+  if not Supported(AValue) then
+  begin
+    raise EParserOperatorError.Create('Operand not supported');
+  end;
   case Self of
     opAdd:
       begin
-        Result := +Result;
+        Result := AValue;
       end;
     opSub:
       begin
-        Result := -Result;
+        Result := AValue.Negate;
+      end;
+    opRnd:
+      begin
+        Result := TParserValue.Create(SimpleRoundTo(AValue.AsDouble, 0));
+      end;
+    opCmp:
+      begin
+        Result := TParserValue.Create(Sign(AValue.AsDouble));
       end;
   end;
 end;
 {$WARN NO_RETVAL ON}
 
 {$WARN NO_RETVAL OFF}
-function TParserOperatorHelper.Invoke(const AFirst, ASecond: Double): Double;
+function TParserOperatorHelper.Invoke(const AFirst, ASecond: TParserValue): TParserValue;
+
+  function Subtract(const AFirst, ASecond: TArray<TParserValue>): TArray<TParserValue>;
+  var
+    LResult: TList<TParserValue>;
+    LValue: TParserValue;
+  begin
+    LResult := TList<TParserValue>.Create;
+    try
+      LResult.AddRange(AFirst);
+      for LValue in ASecond do
+      begin
+        LResult.Remove(LValue);
+      end;
+      Result := LResult.ToArray;
+    finally
+      LResult.Free;
+    end;
+  end;
+
 begin
+  if not Supported(AFirst, ASecond) then
+  begin
+    raise EParserOperatorError.Create('Operand not supported');
+  end;
   case Self of
     opAdd:
       begin
-        Result := AFirst + ASecond;
+        Result := TParserValue.Add(AFirst, ASecond);
       end;
     opSub:
       begin
-        Result := AFirst - ASecond;
+        case AFirst.Kind of
+          vkDouble:
+            begin
+              Result := TParserValue.Create(AFirst.AsDouble - ASecond.AsDouble);
+            end;
+          vkArray:
+            begin
+              Result := TParserValue.Create(Subtract(AFirst.AsArray, ASecond.AsArray));
+            end;
+        end;
+      end;
+    opCmp:
+      begin
+        Result := TParserValue.Create(TParserValue.Compare(AFirst, ASecond));
       end;
     opMul:
       begin
-        Result := AFirst * ASecond;
+        Result := TParserValue.Create(AFirst.AsDouble * ASecond.AsDouble);
       end;
     opDiv:
       begin
-        Result := AFirst / ASecond;
+        Result := TParserValue.Create(AFirst.AsDouble / ASecond.AsDouble);
       end;
     opMod:
       begin
-        Result := FMod(AFirst, ASecond);
+        Result := TParserValue.Create(FMod(AFirst.AsDouble, ASecond.AsDouble));
       end;
     opExp:
       begin
-        Result := Power(AFirst, ASecond);
+        Result := TParserValue.Create(Power(AFirst.AsDouble, ASecond.AsDouble));
       end;
   end;
 end;
 {$WARN NO_RETVAL ON}
 
+function TParserOperatorHelper.Supported(const AValue: TParserValue): Boolean;
+const
+  LSupportedUnaryOperators: array [TParserValueKind] of TParserOperators = (
+    [opAdd],
+    [opAdd, opSub, opRnd, opCmp],
+    [opAdd],
+    [opAdd, opSub],
+    [opAdd]
+  );
+begin
+  Result := Self in LSupportedUnaryOperators[AValue.Kind];
+end;
+
+function TParserOperatorHelper.Supported(const AFirst, ASecond: TParserValue): Boolean;
+const
+  LSupportedBinaryOperators: array [TParserValueKind] of TParserOperators = (
+    [],
+    [opAdd, opSub, opCmp, opMul, opDiv, opExp],
+    [opAdd, opCmp],
+    [opAdd, opSub, opCmp],
+    [opAdd, opCmp]
+  );
+begin
+  Result := (Self in LSupportedBinaryOperators[AFirst.Kind]) and (Self in LSupportedBinaryOperators[ASecond.Kind]);
+end;
+
 function TParserOperatorHelper.ToChar: Char;
 const
-  LOperators: array [TParserOperator] of Char = ('+', '-', '*', '/', '%', '^');
+  LOperators: array [TParserOperator] of Char = ('+', '-', '~', '?', '*', '/', '%', '^');
 begin
   Result := LOperators[Self];
 end;
@@ -263,11 +514,46 @@ begin
   FOperator := AOperator;
 end;
 
+{ TParserAbsNode }
+
+function TParserAbsNode.GetValue: TParserValue;
+begin
+  Result := TParserValue.Create(Abs(inherited GetValue.AsDouble));
+end;
+
 { TParserParentNode }
 
 procedure TParserParentNode.Add(const ANode: TParserNode);
 begin
   FNodes.Add(ANode);
+end;
+
+function TParserParentNode.ChildrenValues: TArray<TParserValue>;
+var
+  LValues: TList<TParserValue>;
+  LNode: TParserNode;
+begin
+  LValues := TList<TParserValue>.Create;
+  try
+    for LNode in Self do
+    begin
+      if (LNode as TParserArgNode).Spread then
+      begin
+        LValues.AddRange(LNode.Value.AsArray);
+      end else
+      begin
+        LValues.Add(LNode.Value);
+      end;
+    end;
+    Result := LValues.ToArray;
+  finally
+    LValues.Free;
+  end;
+end;
+
+procedure TParserParentNode.Clear;
+begin
+  FNodes.Clear;
 end;
 
 constructor TParserParentNode.Create(const AParent: TParserParentNode; const AOperator: TParserOperator);
@@ -297,14 +583,23 @@ begin
   Result := FNodes[AIndex];
 end;
 
-function TParserParentNode.GetValue: Double;
+function TParserParentNode.GetValue: TParserValue;
 var
+  LIndex: Integer;
   LNode: TParserNode;
 begin
   inherited;
-  Result := Default(Double);
-  for LNode in Self do
+  if Count = 0 then
   begin
+    Result := TParserValue.Empty[vkDouble];
+  end else
+  begin
+    LNode := Nodes[0];
+    Result := LNode.&Operator.Invoke(LNode.Value);
+  end;
+  for LIndex := 1 to Pred(Count) do
+  begin
+    LNode := Nodes[LIndex];
     Result := LNode.&Operator.Invoke(Result, LNode.Value);
   end;
 end;
@@ -319,27 +614,52 @@ end;
 
 { TParserNamedNode }
 
-function TParserNamedNode.ChildrenValues: TArray<Double>;
-var
-  LIndex: Integer;
-begin
-  SetLength(Result, Count);
-  for LIndex := 0 to Pred(Count) do
-  begin
-    Result[LIndex] := Self[LIndex].Value;
-  end;
-end;
-
 constructor TParserNamedNode.Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AName: String);
 begin
   inherited Create(AParent, AOperator);
   FName := AName;
 end;
 
-function TParserNamedNode.GetValue: Double;
+function TParserNamedNode.GetValue: TParserValue;
 begin
-  inherited;
   Result := SyntaxTree.Values[Name, ChildrenValues];
+end;
+
+{ TParserArrayNode }
+
+function TParserArrayNode.GetValue: TParserValue;
+begin
+  Result := TParserValue.Create(ChildrenValues);
+end;
+
+{ TParserRecordNode }
+
+function TParserRecordNode.ChildrenNames: TArray<String>;
+var
+  LIndex: Integer;
+begin
+  SetLength(Result, Count);
+  for LIndex := 0 to Pred(Count) do
+  begin
+    Result[LIndex] := (Nodes[LIndex] as TParserNamedArgNode).Name;
+  end;
+end;
+
+function TParserRecordNode.GetValue: TParserValue;
+var
+  LResult: TArray<TPair<String, TParserValue>>;
+  LNames: TArray<String>;
+  LValues: TArray<TParserValue>;
+  LIndex: Integer;
+begin
+  SetLength(LResult, Count);
+  LValues := ChildrenValues;
+  LNames := ChildrenNames;
+  for LIndex := Low(LResult) to High(LResult) do
+  begin
+    LResult[LIndex] := TPair<String, TParserValue>.Create(LNames[LIndex], LValues[LIndex]);
+  end;
+  Result := TParserValue.Create(LResult);
 end;
 
 { TParserArgNode }
@@ -349,28 +669,85 @@ begin
   inherited Create(AParent, opAdd);
 end;
 
+{ TParserNamedArgNode }
+
+constructor TParserNamedArgNode.Create(const AParent: TParserParentNode; const AName: String);
+begin
+  inherited Create(AParent);
+  FName := AName;
+end;
+
 { TParserValueNode }
 
-constructor TParserValueNode.Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AValue: Double);
+constructor TParserValueNode.Create(const AParent: TParserParentNode; const AOperator: TParserOperator; const AValue: TParserValue);
 begin
   inherited Create(AParent, AOperator);
   FValue := AValue;
 end;
 
-function TParserValueNode.GetValue: Double;
+function TParserValueNode.GetValue: TParserValue;
 begin
   inherited;
   Result := FValue;
 end;
 
+{ TParserRefNode }
+
+constructor TParserRefNode.Create(const AParent: TParserParentNode; const AName: String);
+begin
+  inherited Create(AParent, opAdd);
+  FName := AName;
+end;
+
+function TParserRefNode.GetValue: TParserValue;
+begin
+  Result := TParserValue.Create(SyntaxTree.RefTargets[Name]);
+end;
+
+{ TParserDeRefNode }
+
+constructor TParserDeRefNode.Create(const AParent: TParserParentNode; const AName: String);
+begin
+  inherited Create(AParent, opAdd, AName);
+end;
+
+function TParserDeRefNode.GetValue: TParserValue;
+begin
+  Result := SyntaxTree.Values[Name, []].AsReference.Value[ChildrenValues];
+end;
+
+{ TParserIfNode }
+
+function TParserIfNode.GetValue: TParserValue;
+begin
+  if not Nodes[0].Value.IsEmpty then
+  begin
+    Result := Nodes[1].Value;
+  end else
+  begin
+    Result := Nodes[2].Value;
+  end;
+end;
+
+{ TParserTryNode }
+
+function TParserTryNode.GetValue: TParserValue;
+begin
+  try
+    Result := Nodes[0].Value;
+  except
+    Result := Nodes[1].Value;
+  end;
+end;
+
 { TParserTree }
 
-function TParserTree.Calculate: Double;
+function TParserTree.Calculate: TParserValue;
 begin
   Result := Nodes.Value;
 end;
 
-constructor TParserTree.Create(const AValueSuppliers: TArray<IParserValueSupplier>);
+constructor TParserTree.Create(const AValueSuppliers: TArray<IParserValueSupplier> = []);
 begin
   inherited Create;
   FValueSuppliers := AValueSuppliers;
@@ -383,7 +760,26 @@ begin
   inherited;
 end;
 
-function TParserTree.GetValues(const AName: String; const AArgs: TArray<Double>): Double;
+function TParserTree.GetEnumerator: TEnumerator<TParserNode>;
+begin
+  Result := FNodes.GetEnumerator;
+end;
+
+function TParserTree.GetRefTargets(const AName: String): IParserValueRefTarget;
+var
+  LSupplier: IParserValueSupplier;
+begin
+  for LSupplier in FValueSuppliers do
+  begin
+    if LSupplier.ContainsValue(AName) then
+    begin
+      Exit(LSupplier.RefTargets[AName]);
+    end;
+  end;
+  raise EParserTreeUnknownError.CreateFmt('Undeclared identifier: %s', [AName.QuotedString]);
+end;
+
+function TParserTree.GetValues(const AName: String; const AArgs: TArray<TParserValue>): TParserValue;
 var
   LSupplier: IParserValueSupplier;
 begin
@@ -395,6 +791,31 @@ begin
     end;
   end;
   raise EParserTreeUnknownError.CreateFmt('Undeclared identifier: %s', [AName.QuotedString]);
+end;
+
+procedure TParserTree.Optimize;
+var
+  LNode: TParserNode;
+
+  procedure OptimizeNode(const ANode: TParserNode);
+  var
+    LNode: TParserNode;
+  begin
+    if ANode is TParserParentNode then
+    begin
+      for LNode in (ANode as TParserParentNode) do
+      begin
+        OptimizeNode(ANode);
+      end;
+      // Optimize tree node
+    end;
+  end;
+
+begin
+//  for LNode in Self do
+//  begin
+//    OptimizeNode(LNode);
+//  end;
 end;
 
 end.
