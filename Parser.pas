@@ -7,7 +7,9 @@ uses
   Parser.Dictionary, Parser.Exception, Parser.Language, Parser.Lexer, Parser.Package, Parser.Syntax, Parser.Exporter, Parser.Value;
 
 type
-  TParserExpressionKind = (exEmpty, exTerm, exResolution, exDeclConstant, exDeclVariable, exDeclFunction, exDeclType, exDeclConstructor, exDeclInline, exDeclAlias, exShow, exDeletion, exAssertion, exLinkage);
+  TParserExpressionKind = (exEmpty, exTerm, exResolution, exDeclConstant, exDeclVariable, exDeclFunction, exDeclType, exDeclConstructor, exDeclInline, exOption, exDeclAlias, exShow, exDeletion, exAssertion, exLinkage);
+
+  TParserExpressionKinds = set of TParserExpressionKind;
 
   TParserExpressionKindHelper = record helper for TParserExpressionKind
   public
@@ -61,20 +63,26 @@ type
     constructor Create(const AParser: TParser; const AName: String);
   end;
 
-  TParserOption = (poWarnings, poOptimization);
-
-  TParserOptions = set of TParserOption;
+  TParserOption = (poWarnings, poOptimization, poAllowed, poInitialValue);
 
   TParserOptionHelper = record helper for TParserOption
   public
     constructor Create(const AName: String);
+    procedure Define(const AParser: TParser; const AValue: TParserValue);
   end;
 
-  TParserOptionsHelper = record helper for TParserOptions
+  TParserOptions = class
   private
-    class function GetDefaultOptions: TParserOptions; static;
+    FWarnings: Boolean;
+    FOptimization: Boolean;
+    FAllowed: TParserExpressionKinds;
+    FInitialValue: TParserValue;
   public
-    class property DefaultOptions: TParserOptions read GetDefaultOptions;
+    property Warnings: Boolean read FWarnings write FWarnings;
+    property Optimization: Boolean read FOptimization write FOptimization;
+    property Allowed: TParserExpressionKinds read FAllowed write FAllowed;
+    property InitialValue: TParserValue read FInitialValue write FInitialValue;
+    constructor Create;
   end;
 
   TParser = class(TSingletonImplementation, IParserValueSupplier, IParserPackageLinks)
@@ -111,7 +119,7 @@ type
     property StandardPackages: TParserStandardPackages read GetStandardPackages write SetStandardPackages;
     property PackagePaths: TStringList read FPackagePaths;
     property Objects[const AName: String]: TParserObject read GetObjects;
-    property Options: TParserOptions read FOptions write FOptions;
+    property Options: TParserOptions read FOptions;
     constructor Create;
     destructor Destroy; override;
     function HasPackage(const AName: String): Boolean;
@@ -167,6 +175,10 @@ begin
           kwAlias:
             begin
               Self := exDeclAlias;
+            end;
+          kwOpt:
+            begin
+              Self := exOption;
             end;
           kwShow:
             begin
@@ -358,24 +370,59 @@ end;
 { TParserOptionHelper }
 
 constructor TParserOptionHelper.Create(const AName: String);
-const
-  LOptionNames: array [TParserOption] of String = ('Warnings', 'Optimization');
 var
   LIndex: Integer;
 begin
-  LIndex := IndexText(AName, LOptionNames);
-  if LIndex = -1 then
+  LIndex := IndexText(AName, ['Warnings', 'Optimization', 'Allowed', 'InitialValue']);
+  if not (LIndex in [Ord(Low(TParserOption)) .. Ord(High(TParserOption))]) then
   begin
     raise EParserOptionError.CreateFmt('Option %s not not', [AName.QuotedString]);
   end;
   Self := TParserOption(LIndex);
 end;
 
-{ TParserOptionsHelper }
+procedure TParserOptionHelper.Define(const AParser: TParser; const AValue: TParserValue);
 
-class function TParserOptionsHelper.GetDefaultOptions: TParserOptions;
+  function ExpressionKinds(const AValues: TArray<TParserValue>): TParserExpressionKinds;
+  var
+    LElement: TParserValue;
+  begin
+    Result := Default(TParserExpressionKinds);
+    for LElement in AValues do
+    begin
+      Include(Result, TParserExpressionKind(LElement.AsInteger));
+    end;
+  end;
+
 begin
-  Result := [Low(TParserOption) .. High(TParserOption)];
+  case Self of
+    poWarnings:
+      begin
+        AParser.Options.Warnings := AValue.AsBoolean;
+      end;
+    poOptimization:
+      begin
+        AParser.Options.Optimization := AValue.AsBoolean;
+      end;
+    poAllowed:
+      begin
+        AParser.Options.Allowed := ExpressionKinds(AValue.AsArray);
+      end;
+    poInitialValue:
+      begin
+        AParser.Options.InitialValue := AValue;
+      end;
+  end;
+end;
+
+{ TParserOptions }
+
+constructor TParserOptions.Create;
+begin
+  Warnings := True;
+  Optimization := True;
+  Allowed := [Low(TParserExpressionKind) .. High(TParserExpressionKind)];
+  InitialValue := TParserValue.Empty[vkDouble];
 end;
 
 { TParser }
@@ -412,11 +459,12 @@ begin
   StandardPackages := TParserStandardPackages.DefaultPackages;
   FPackagePaths := TStringList.Create;
   PackagePaths.OnChange := PackagePathsChange;
-  Options := TParserOptions.DefaultOptions;
+  FOptions := TParserOptions.Create;
 end;
 
 destructor TParser.Destroy;
 begin
+  Options.Free;
   PackagePaths.Free;
   UnregisterPackage(TParserPackage.DefaultPackage.Name);
   FOrderedPackageNames.Free;
@@ -448,6 +496,7 @@ var
     LValue: TParserValue;
     LFunct: TParserCustomFunction;
     LFunctParams: TList<TParserParam>;
+    LFunctParamNames: TStringList;
     LFunctParamName: String;
     LTypeClass: TParserTypeClass;
     LType: IParserValueConstraint;
@@ -455,7 +504,7 @@ var
     LExporter: TParserCodeExporter;
     LNameData: TParserNameData;
 
-    procedure BuildTree(const AEnding: Boolean = True);
+    procedure BuildTree(const AFunctParamDef: Boolean = False);
     var
       LNode: TParserParentNode;
 
@@ -490,7 +539,7 @@ var
             tkSymbolHash:
               begin
                 LDeRef := True;
-                ExpectToken([tkName]);
+                ExpectToken([tkSymbolParOp, tkName]);
                 BuildSubNode;
               end;
             tkSymbolParOp:
@@ -508,7 +557,7 @@ var
             tkSymbolBraceOp:
               begin
                 LNode := TParserRecordNode.Create(LNode, LOperator);
-                ExpectToken([tkEnd, tkSymbolBraceCl, tkName]);
+                ExpectToken([tkEnd, tkSymbolParOp, tkSymbolBraceCl, tkName]);
                 BuildParentNode(nkFields);
               end;
             tkSymbolAbs:
@@ -591,24 +640,43 @@ var
             end;
           nkFields:
             begin
-              if LToken.Kind = tkName then
-              begin
-                LNode := TParserNamedArgNode.Create(LNode, LToken.Name);
-                ExpectToken([tkSymbolEq]);
-                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName]);
-              end else
-              begin
-                LNode := TParserArgNode.Create(LNode);
+              case LToken.Kind of
+                tkSymbolParOp:
+                  begin
+                    LNode := TParserDynamicNamedArgNode.Create(LNode);
+                    ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                    BuildParentNode(nkFieldName);
+                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                    LNode := TParserArgNode.Create(LNode);
+                  end;
+                tkName:
+                  begin
+                    LNode := TParserStaticNamedArgNode.Create(LNode, LToken.Name);
+                    ExpectToken([tkSymbolEq]);
+                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                  end;
+                else
+                  begin
+                    LNode := TParserArgNode.Create(LNode);
+                  end;
               end;
+            end;
+          nkFieldName:
+            begin
+              LNode := TParserArgNode.Create(LNode);
             end;
         end;
         repeat
           case LToken.Kind of
             tkSymbolParCl:
               begin
-                if not Assigned(LNode.Parent) or not (AKind in [nkNone, nkArgs]) or ((AKind = nkArgs) and not Assigned(LNode.Parent.Parent)) then
+                if not Assigned(LNode.Parent) or not (AKind in [nkNone, nkArgs, nkFieldName]) or ((AKind = nkArgs) and not Assigned(LNode.Parent.Parent)) then
                 begin
-                  raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
+                  if not AFunctParamDef then
+                  begin
+                    raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
+                  end;
+                  Break;
                 end;
                 if AKind = nkArgs then
                 begin
@@ -622,7 +690,7 @@ var
                   end;
                 end;
                 LNode := LNode.Parent;
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolAbs], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
+                ExpectToken(TParserTokenKind.AllowedAfter[AKind], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
                 Exit;
               end;
             tkSymbolBrackCl:
@@ -663,6 +731,10 @@ var
                     LNode := LNode.Parent;
                   end;
                 end;
+                if LNode is TParserDynamicNamedArgNode then
+                begin
+                  LNode := LNode.Parent;
+                end;
                 LNode := LNode.Parent;
                 ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
                 Exit;
@@ -700,17 +772,36 @@ var
                     end;
                   nkFields:
                     begin
-                      ExpectToken([tkName]);
-                      LNode := TParserNamedArgNode.Create(LNode.Parent, LToken.Name);
-                      ExpectToken([tkSymbolEq]);
+                      if LNode.Parent is TParserDynamicNamedArgNode then
+                      begin
+                        LNode := LNode.Parent;
+                      end;
+                      ExpectToken([tkName, tkSymbolParOp]);
+                      case LToken.Kind of
+                        tkSymbolParOp:
+                          begin
+                            LNode := TParserDynamicNamedArgNode.Create(LNode.Parent);
+                            ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                            BuildParentNode(nkFieldName);
+                            LNode := TParserArgNode.Create(LNode);
+                          end;
+                        tkName:
+                          begin
+                            LNode := TParserStaticNamedArgNode.Create(LNode.Parent, LToken.Name);
+                            ExpectToken([tkSymbolEq]);
+                          end;
+                      end;
                     end;
                   else
                     begin
-                      raise EParserCommaError.CreateFmt('Unexpected separator at %d', [LToken.CharIndex]);
+                      if not AFunctParamDef then
+                      begin
+                        raise EParserCommaError.CreateFmt('Unexpected separator at %d', [LToken.CharIndex]);
+                      end;
+                      Break;
                     end;
                 end;
                 ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[AKind]);
-                //Exit;
               end;
             tkName:
               begin
@@ -729,7 +820,7 @@ var
                 BuildSubNode;
               end;
           end;
-        until LToken.Kind = tkEnd;
+        until (LToken.Kind = tkEnd);
         if AKind in [nkElse, nkExcept] then
         begin
           LNode := LNode.Parent.Parent;
@@ -780,6 +871,14 @@ var
     end;
 
   begin
+    if not (Result.ExpressionKind in Options.Allowed) then
+    begin
+      if Result.ExpressionKind = exTerm then
+      begin
+        raise EParserCommandError.Create('Expression not allowed');
+      end;
+      raise EParserCommandError.CreateFmt('Command %s not allowed', [LToken.Name.QuotedString]);
+    end;
     case Result.ExpressionKind of
       exTerm:
         begin
@@ -836,7 +935,7 @@ var
               end;
             end else
             begin
-              LValue := TParserValue.Empty[vkDouble];
+              LValue := Options.InitialValue;
             end;
             for LObjectName in LObjectNames do
             begin
@@ -851,52 +950,70 @@ var
           ExpectToken([tkName]);
           LObjectName := LToken.Name;
           ExpectToken([tkSymbolEq, tkSymbolParOp]);
-          LFunctParams := TList<TParserParam>.Create{(dupError, False, False)}; // Duplicate check is done at TParserFunction.Create(...)
+          LFunctParams := TList<TParserParam>.Create;
           try
             if LToken.Kind = tkSymbolParOp then
             begin
-              repeat
-                ExpectToken([tkSymbolParCl, tkName]);
-                if LToken.Kind = tkName then
-                begin
-                  LFunctParamName := LToken.Name;
-                  ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolColon, tkSymbolParCl]);
-                  if LToken.Kind = tkSymbolColon then
+              LFunctParamNames := TStringList.Create;
+              try
+                repeat
+                  ExpectToken([tkSymbolParCl, tkName]);
+                  if LToken.Kind = tkName then
                   begin
-                    ExpectToken([tkName], TParserKeyword.TypeConstructors + [kwNone]);
-                    LTypeClass := TParserType.TypeClasses[LToken.Keyword];
-                    if Assigned(LTypeClass) then
+                    repeat
+                      LFunctParamNames.Add(LToken.Name);
+                      ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolColon, tkSymbolAmp, tkSymbolParCl]);
+                      if LToken.Kind = tkSymbolAmp then
+                      begin
+                        ExpectToken([tkName]);
+                      end;
+                    until LToken.Kind <> tkName;
+                    if LToken.Kind = tkSymbolColon then
                     begin
-                      ParseType([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
-                      LType := TParserTempType.Create(LType as TParserType);
+                      ExpectToken([tkName], TParserKeyword.TypeConstructors + [kwNone]);
+                      LTypeClass := TParserType.TypeClasses[LToken.Keyword];
+                      if Assigned(LTypeClass) then
+                      begin
+                        ParseType([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
+  //                      LType := TParserTempType.Create(LType as TParserType);
+                      end else
+                      begin
+                        if not (Objects[LToken.Name] is TParserType) then
+                        begin
+                          raise EParserNoTypeError.CreateFmt('%s is not a type', [LObjectName]);
+                        end;
+                        LType := Objects[LToken.Name] as TParserType;
+                        ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
+                      end;
+                    end;
+                    if LToken.Kind = tkSymbolEq then
+                    begin
+                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+                      LSyntaxTree := TParserTree.Create([Self]);
+                      try
+                        BuildTree(True);
+                        LValue := LSyntaxTree.Calculate;
+                      finally
+                        LSyntaxTree.Free;
+                      end;
+                      for LFunctParamName in LFunctParamNames do
+                      begin
+                        LFunctParams.Add(TParserParam.Create(LFunctParamName, LValue, LType));
+                      end;
                     end else
                     begin
-                      if not (Objects[LToken.Name] is TParserType) then
+                      for LFunctParamName in LFunctParamNames do
                       begin
-                        raise EParserNoTypeError.CreateFmt('%s is not a type', [LObjectName]);
+                        LFunctParams.Add(TParserParam.Create(LFunctParamName, LType));
                       end;
-                      LType := Objects[LToken.Name] as TParserType;
-                      ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
                     end;
+                    LFunctParamNames.Clear;
+                    LType := Default(IParserValueConstraint);
                   end;
-                  if LToken.Kind = tkSymbolEq then
-                  begin
-                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
-                    LSyntaxTree := TParserTree.Create([Self]);
-                    try
-                      BuildTree;
-                      LValue := LSyntaxTree.Calculate;
-                    finally
-                      LSyntaxTree.Free;
-                    end;
-                    LFunctParams.Add(TParserParam.Create(LFunctParamName, LValue, LType));
-                  end else
-                  begin
-                    LFunctParams.Add(TParserParam.Create(LFunctParamName, LType));
-                  end;
-                  LType := Default(IParserValueConstraint);
-                end;
-              until LToken.Kind = tkSymbolParCl;
+                until LToken.Kind = tkSymbolParCl;
+              finally
+                LFunctParamNames.Free;
+              end;
               ExpectToken([tkSymbolEq]);
             end;
             ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
@@ -909,12 +1026,25 @@ var
                 LSyntaxTree.Free;
                 raise;
               end;
-              if poOptimization in Options then
+              if Options.Optimization then
               begin
                 LSyntaxTree.Optimize;
               end;
               LFunct.SyntaxTree := LSyntaxTree;
-              Dictionary.Add(LFunct);
+              case Result.ExpressionKind of
+                exDeclFunction:
+                  begin
+                    Dictionary.Add(LFunct);
+                  end;
+                exDeclConstructor:
+                  begin
+                    if not (Dictionary[LFunct.Name] is TParserType) then
+                    begin
+                      raise EParserNoTypeError.CreateFmt('%s is not a type', [LFunct.Name]);
+                    end;
+                    (Dictionary[LFunct.Name] as TParserType).&Constructor := LFunct;
+                  end;
+              end;
             except
               LFunct.Free;
               raise;
@@ -939,17 +1069,17 @@ var
         end;
       exDeclInline:
         begin
-          ExpectToken([tkName]);
-          LObjectName := LToken.Name;
-          ExpectToken([tkSymbolEq]);
-          ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
-          LSyntaxTree := TParserTree.Create([LFunct, Self]);
-          try
-            BuildTree;
-          except
-            LSyntaxTree.Free;
-            raise;
-          end;
+//          ExpectToken([tkName]);
+//          LObjectName := LToken.Name;
+//          ExpectToken([tkSymbolEq]);
+//          ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+//          LSyntaxTree := TParserTree.Create([LFunct, Self]);
+//          try
+//            BuildTree;
+//          except
+//            LSyntaxTree.Free;
+//            raise;
+//          end;
         end;
       exDeclAlias:
         begin
@@ -960,6 +1090,27 @@ var
             for LObjectName in LObjectNames do
             begin
               Dictionary.AddAlias(LObjectName, LToken.Name);
+            end;
+          finally
+            LObjectNames.Free;
+          end;
+        end;
+      exOption:
+        begin
+          LObjectNames := TStringList.Create;
+          try
+            ParseObjectNames([tkSymbolEq]);
+            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+            LSyntaxTree := TParserTree.Create([Self]);
+            try
+              BuildTree;
+              LValue := LSyntaxTree.Calculate;
+            finally
+              LSyntaxTree.Free;
+            end;
+            for LObjectName in LObjectNames do
+            begin
+              TParserOption.Create(LObjectName).Define(Self, LValue);
             end;
           finally
             LObjectNames.Free;
@@ -1045,7 +1196,10 @@ begin
     ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.ExpressionStarters + TParserKeyword.Allowed[nkNone]);
     Result.FExpressionKind := TParserExpressionKind.Create(LToken);
     EvaluateExpression;
-    Result.FWarnings := LWarnings.ToStringArray;
+    if Options.Warnings then
+    begin
+      Result.FWarnings := LWarnings.ToStringArray;
+    end;
   finally
     LLexer.Free;
     LWarnings.Free;

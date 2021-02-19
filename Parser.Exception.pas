@@ -8,6 +8,8 @@ uses
 type
   EParserError = class abstract(Exception);
 
+    EParserCommandError = class(EParserError);
+
     EParserUnknownPackageError = class(EParserError);
 
     EParserDuplicatePackageError = class(EParserError);
@@ -103,6 +105,8 @@ type
       EParserValueComparisonError = class(EParserValueError);
 
       EParserValueNegationError = class(EParserValueError);
+
+      EParserValueAbsolutionError = class(EParserValueError);
 
       EParserValueRefError = class(EParserValueError);
 

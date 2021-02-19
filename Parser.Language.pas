@@ -7,17 +7,22 @@ uses
   Parser.Exception, Parser.Syntax, Parser.Value;
 
 type
-  TParserAttrib = class;
+  TParserAttribute = class;
 
   TParserObject = class abstract(TSingletonImplementation)
   private
     FName: String;
+    FAttributes: TDictionary<String, TPair<TParserAttribute, TArray<TParserValue>>>;
+    FOrderedAttributeNames: TStringList;
     function GetName: String; // Only to support IParserValueRefTarget
+    function GetAttributes(const AName: String): TPair<TParserAttribute, TArray<TParserValue>>;
+    function GetAttributeCount: Integer;
   protected
     function GetValue(const AArgs: TArray<TParserValue>): TParserValue; virtual;
     function GetMinArgCount: Integer; virtual; abstract;
     function GetMaxArgCount: Integer; virtual; abstract;
     function GetArgTypes(const AIndex: Integer): IParserValueConstraint; virtual; abstract;
+    procedure ProcessAttributes;
   public
     class function ValidName(const AName: String; const AAllowEmpty: Boolean = False): Boolean; // Must NOT be virtual, due to generic aliasing
     property Name: String read GetName;
@@ -25,9 +30,13 @@ type
     property MaxArgCount: Integer read GetMaxArgCount;
     property ArgTypes[const AIndex: Integer]: IParserValueConstraint read GetArgTypes;
     property Value[const AArgs: TArray<TParserValue>]: TParserValue read GetValue;
-//    property Attribs[const AIndex: Integer]: TParserAttrib read GetAttribs;
-//    property AttribCount: Integer read GetAttribCount;
+    property Attributes[const AName: String]: TPair<TParserAttribute, TArray<TParserValue>> read GetAttributes;
+    property AttributeCount: Integer read GetAttributeCount;
     constructor Create(const AName: String);
+    destructor Destroy; override;
+    function HasAttribute(const AName: String): Boolean;
+    procedure AddAttribute(const AAttribute: TParserAttribute; const AArgs: TArray<TParserValue>);
+    procedure RemoveAttribute(const AName: String);
   end;
 
   TParserObjectHelper = class helper for TParserObject
@@ -37,6 +46,18 @@ type
   public
     property Writable: Boolean read GetWritable;
     property Addressable: Boolean read GetAddressable;
+  end;
+
+  TParserDelegate<T: TParserObject, IParserValueRefTarget> = class(TInterfacedObject, IParserValueRefTarget)
+  private
+    FObject: T;
+    function GetDelegation: IParserValueRefTarget;
+  protected
+    property Delegation: IParserValueRefTarget read GetDelegation implements IParserValueRefTarget;
+  public
+    property &Object: T read FObject;
+    constructor Create(const AObject: T);
+    destructor Destroy; override;
   end;
 
   IParserWritableObject = interface
@@ -162,6 +183,13 @@ type
     destructor Destroy; override;
   end;
 
+  TParserFunctionDelegate = class(TParserDelegate<TParserFunction>)
+  public
+    constructor Create(const AParams: TArray<TParserParam>; const AOnInvoke: TParserFunctionEvent; const AVarArg: Boolean = False); overload;
+    constructor Create(const AParams: TArray<TParserParam>; const AFunction: TFunc<TArray<TParserValue>, TParserValue>; const AVarArg: Boolean = False); overload;
+    constructor Create(const AParams: TArray<TParserParam>; const ASyntaxTree: TParserTree); overload;
+  end;
+
   TParserTypeClass = class of TParserType;
 
   TParserType = class abstract(TParserObject, IParserValueConstraint, IParserValueRefTarget)
@@ -174,60 +202,84 @@ type
     function GetMaxArgCount: Integer; override;
     function GetArgTypes(const AIndex: Integer): IParserValueConstraint; override;
     function GetSupported(const AValue: TParserValue): Boolean; virtual; abstract;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; virtual;
     function GetNew: TParserValue; virtual;
   public
     class property TypeClasses[const AKeyword: TParserKeyword]: TParserTypeClass read GetTypeClasses;
     property &Constructor: TParserFunction read FConstructor write FConstructor;
     property Supported[const AValue: TParserValue]: Boolean read GetSupported;
+    property Included[const AType: IParserValueConstraint]: Boolean read GetIncluded;
     property New: TParserValue read GetNew;
     destructor Destroy; override;
     procedure AssertValue(const AValue: TParserValue);
   end;
 
-  TParserEventType = class;
-
-  TParserTypeEvent = function (const AType: TParserEventType; const AValue: TParserValue): Boolean of object;
-
-  TParserEventType = class(TParserType)
+  TParserCustomType = class(TParserType)
   private
-    FOnCheck: TParserTypeEvent;
+    FAssertFunction: TParserFunction;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
-    property OnCheck: TParserTypeEvent read FOnCheck;
-    constructor Create(const AName: String; const AOnCheck: TParserTypeEvent);
-  end;
-
-  TParserReferenceType = class(TParserType)
-  private
-    FChecker: TFunc<TParserValue, Boolean>;
-  protected
-    function GetSupported(const AValue: TParserValue): Boolean; override;
-  public
-    property Checker: TFunc<TParserValue, Boolean> read FChecker;
-    constructor Create(const AName: String; const AChecker: TFunc<TParserValue, Boolean>);
+    property AssertFunction: TParserFunction read FAssertFunction;
+    constructor Create(const AName: String; const AAssertFunction: TParserFunction);
   end;
 
   TParserAnyType = class(TParserType)
   private
-    FTypes: TObjectList<TParserType>;
+    FTypes: TList<IParserValueConstraint>;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
     constructor Create(const AName: String); overload;
-    constructor Create(const AName: String; const ATypes: TArray<TParserType>); overload;
-    function GetEnumerator: TEnumerator<TParserType>; overload;
+    constructor Create(const AName: String; const ATypes: TArray<IParserValueConstraint>); overload;
+    function GetEnumerator: TEnumerator<IParserValueConstraint>; overload;
   end;
 
-  TParserRefType = class(TParserType)
+  TParserValueType = class(TParserType)
+  protected
+    function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
+  end;
+
+  TParserReferenceType = class(TParserType)
+  protected
+    function GetSupported(const AValue: TParserValue): Boolean; override;
+  end;
+
+  TParserVariableReferenceType = class(TParserReferenceType)
   private
-    FType: TParserType;
+    FVarType: IParserValueConstraint;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
   public
-    property &Type: TParserType read FType;
-    constructor Create(const AName: String); overload;
-    constructor Create(const AName: String; const AType: TParserType); overload;
+    property VarType: IParserValueConstraint read FVarType;
+    constructor Create(const AName: String; const AVarType: IParserValueConstraint);
+  end;
+
+  TParserFunctionReferenceType = class(TParserReferenceType)
+  private
+    FParamTypes: TList<IParserValueConstraint>;
+    function GetParamTypeCount: Integer;
+    function GetParamTypes(const AIndex: Integer): IParserValueConstraint;
+  protected
+    function GetSupported(const AValue: TParserValue): Boolean; override;
+  public
+    property ParamTypes[const AIndex: Integer]: IParserValueConstraint read GetParamTypes;
+    property ParamTypeCount: Integer read GetParamTypeCount;
+    constructor Create(const AName: String; const AParamTypes: TArray<IParserValueConstraint>);
+    function GetEnumerator: TEnumerator<IParserValueConstraint>; overload;
+  end;
+
+  TParserTypeReferenceType = class(TParserReferenceType)
+  private
+    FTypeConstraint: IParserValueConstraint;
+  protected
+    function GetSupported(const AValue: TParserValue): Boolean; override;
+  public
+    property TypeConstraint: IParserValueConstraint read FTypeConstraint;
+    constructor Create(const AName: String; const ATypeConstraint: IParserValueConstraint);
   end;
 
   TParserRangeType = class(TParserType)
@@ -236,6 +288,7 @@ type
     FMaxValue: TParserValue;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
     property MinValue: TParserValue read FMinValue;
     property MaxValue: TParserValue read FMaxValue;
@@ -249,6 +302,7 @@ type
     function GetValues(const AIndex: Integer): TParserValue;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
     property Values[const AIndex: Integer]: TParserValue read GetValues; default;
     property ValueCount: Integer read GetValueCount;
@@ -260,6 +314,7 @@ type
   TParserNumberType = class(TParserType)
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
     function GetNew: TParserValue; override;
   end;
 
@@ -270,6 +325,7 @@ type
     function GetDivisorCount: Integer;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
     property Divisors[const AIndex: Integer]: TParserValue read GetDivisors; default;
     property DivisorCount: Integer read GetDivisorCount;
@@ -285,6 +341,7 @@ type
     FInteger: TParserIntegerType;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
   public
     property Range: TParserRangeType read FRange;
     property Integer: TParserIntegerType read FInteger;
@@ -298,6 +355,7 @@ type
     FLength: TParserValue;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
     function GetNew: TParserValue; override;
   public
     property Length: TParserValue read FLength;
@@ -313,6 +371,7 @@ type
   TParserArrayType = class(TParserType)
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
     function GetNew: TParserValue; override;
   public
     constructor Create(const AName: String);
@@ -332,6 +391,7 @@ type
     FFields: TList<TParserValue>;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
     function GetFields(const AIndex: Integer): TParserValue; override;
     function GetFieldCount: Integer; override;
     function GetNew: TParserValue; override;
@@ -349,6 +409,7 @@ type
     function GetParentCount: Integer;
   protected
     function GetSupported(const AValue: TParserValue): Boolean; override;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean; override;
     function GetFields(const AIndex: Integer): TParserValue; override;
     function GetFieldCount: Integer; override;
   public
@@ -359,19 +420,7 @@ type
     function GetEnumerator: TEnumerator<TParserFieldType>;
   end;
 
-  TParserTempType = class(TInterfacedObject, IParserValueConstraint)
-  private
-    FType: TParserType;
-    function GetSupported(const AValue: TParserValue): Boolean;
-  public
-    property Supported[const AValue: TParserValue]: Boolean read GetSupported;
-    property &Type: TParserType read FType;
-    constructor Create(const AType: TParserType);
-    destructor Destroy; override;
-    procedure AssertValue(const AValue: TParserValue);
-  end;
-
-  TParserAttrib = class(TParserObject)
+  TParserAttribute = class(TParserObject)
   private
 
   public
@@ -382,6 +431,12 @@ implementation
 
 { TParserObject }
 
+procedure TParserObject.AddAttribute(const AAttribute: TParserAttribute; const AArgs: TArray<TParserValue>);
+begin
+  FAttributes.Add(AAttribute.Name, TPair<TParserAttribute, TArray<TParserValue>>.Create(AAttribute, AArgs));
+  FOrderedAttributeNames.Add(AAttribute.Name);
+end;
+
 constructor TParserObject.Create(const AName: String);
 begin
   inherited Create;
@@ -390,6 +445,25 @@ begin
     raise EParserObjectNameError.CreateFmt('Invalid name: %s', [AName.QuotedString]);
   end;
   FName := AName;
+  FAttributes := TDictionary<String, TPair<TParserAttribute, TArray<TParserValue>>>.Create(TIStringComparer.Ordinal);
+  FOrderedAttributeNames := TStringList.Create;
+end;
+
+destructor TParserObject.Destroy;
+begin
+  FOrderedAttributeNames.Free;
+  FAttributes.Free;
+  inherited;
+end;
+
+function TParserObject.GetAttributeCount: Integer;
+begin
+  Result := FAttributes.Count;
+end;
+
+function TParserObject.GetAttributes(const AName: String): TPair<TParserAttribute, TArray<TParserValue>>;
+begin
+  Result := FAttributes[AName];
 end;
 
 function TParserObject.GetName: String;
@@ -414,6 +488,27 @@ begin
   Result := TParserValue.Empty[vkDouble];
 end;
 
+function TParserObject.HasAttribute(const AName: String): Boolean;
+begin
+  Result := FAttributes.ContainsKey(AName);
+end;
+
+procedure TParserObject.ProcessAttributes;
+var
+  LAttribute: TPair<TParserAttribute, TArray<TParserValue>>;
+begin
+  for LAttribute in FAttributes.Values do
+  begin
+    LAttribute.Key.Value[LAttribute.Value];
+  end;
+end;
+
+procedure TParserObject.RemoveAttribute(const AName: String);
+begin
+  FOrderedAttributeNames.Delete(FOrderedAttributeNames.IndexOf(AName));
+  FAttributes.Remove(AName);
+end;
+
 class function TParserObject.ValidName(const AName: String; const AAllowEmpty: Boolean = False): Boolean;
 begin
   Result := (AName.IsEmpty and AAllowEmpty) or (IsValidIdent(AName) and (TParserKeyword.Create(AName) = kwNone));
@@ -429,6 +524,25 @@ end;
 function TParserObjectHelper.GetWritable: Boolean;
 begin
   Result := Supports(Self, IParserWritableObject);
+end;
+
+{ TParserDelegate<T> }
+
+constructor TParserDelegate<T>.Create(const AObject: T);
+begin
+  inherited Create;
+  FObject := AObject;
+end;
+
+destructor TParserDelegate<T>.Destroy;
+begin
+  FObject.Free;
+  inherited;
+end;
+
+function TParserDelegate<T>.GetDelegation: IParserValueRefTarget;
+begin
+  Result := FObject;
 end;
 
 { TParserConstant }
@@ -518,7 +632,13 @@ begin
     begin
       raise EParserFunctionParamDuplicateError.CreateFmt('Redeclared identifier: %s', [LParam.Name.QuotedString]);
     end;
-    if not (poDefault in LParam.Options) then
+    if poDefault in LParam.Options then
+    begin
+      if poType in LParam.Options then
+      begin
+        LParam.&Type.AssertValue(LParam.Default);
+      end;
+    end else
     begin
       if MinArgCount <> ParamCount then
       begin
@@ -746,10 +866,7 @@ function TParserCustomFunction.GetRefTargets(const AName: String): IParserValueR
 var
   LObject: TParserObject;
 begin
-  if FHelpers.ContainsKey(AName) then
-  begin
-    LObject := FHelpers[AName];
-  end;
+  FHelpers.TryGetValue(AName, LObject);
   if (FOrderedParamNames.IndexOf(AName) = -1) and not Assigned(LObject) then
   begin
     raise EParserDictionaryUnknownError.CreateFmt('Undeclared identifier: %s', [AName.QuotedString]);
@@ -789,6 +906,23 @@ begin
   end;
 end;
 
+{ TParserFunctionDelegate }
+
+constructor TParserFunctionDelegate.Create(const AParams: TArray<TParserParam>; const ASyntaxTree: TParserTree);
+begin
+  inherited Create(TParserCustomFunction.Create(String.Empty, AParams, ASyntaxTree));
+end;
+
+constructor TParserFunctionDelegate.Create(const AParams: TArray<TParserParam>; const AFunction: TFunc<TArray<TParserValue>, TParserValue>; const AVarArg: Boolean);
+begin
+  inherited Create(TParserReferenceFunction.Create(String.Empty, AParams, AFunction, AVarArg));
+end;
+
+constructor TParserFunctionDelegate.Create(const AParams: TArray<TParserParam>; const AOnInvoke: TParserFunctionEvent; const AVarArg: Boolean);
+begin
+  inherited Create(TParserEventFunction.Create(String.Empty, AParams, AOnInvoke, AVarArg));
+end;
+
 { TParserType }
 
 procedure TParserType.AssertValue(const AValue: TParserValue);
@@ -814,6 +948,11 @@ begin
   begin
     Result := nil;
   end;
+end;
+
+function TParserType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+  Result := AType = Self as IParserValueConstraint;
 end;
 
 function TParserType.GetMaxArgCount: Integer;
@@ -879,38 +1018,33 @@ begin
   AssertValue(Result);
 end;
 
-{ TParserEventType }
+{ TParserCustomType }
 
-constructor TParserEventType.Create(const AName: String; const AOnCheck: TParserTypeEvent);
+constructor TParserCustomType.Create(const AName: String; const AAssertFunction: TParserFunction);
 begin
   inherited Create(AName);
-  FOnCheck := AOnCheck;
+  FAssertFunction := AAssertFunction;
 end;
 
-function TParserEventType.GetSupported(const AValue: TParserValue): Boolean;
+function TParserCustomType.GetIncluded(const AType: IParserValueConstraint): Boolean;
 begin
-  Result := OnCheck(Self, AValue);
+  Result := inherited or ((AType is TParserCustomType) and ((AType as TParserCustomType).AssertFunction = AssertFunction));
 end;
 
-{ TParserReferenceType }
-
-constructor TParserReferenceType.Create(const AName: String; const AChecker: TFunc<TParserValue, Boolean>);
+function TParserCustomType.GetSupported(const AValue: TParserValue): Boolean;
+var
+  LArgs: TArray<TParserValue>;
 begin
-  inherited Create(AName);
-  FChecker := AChecker;
-end;
-
-function TParserReferenceType.GetSupported(const AValue: TParserValue): Boolean;
-begin
-  Result := Checker(AValue);
+  LArgs := [AValue, TParserValue.Create(Self)];
+  Result := AssertFunction.Value[Copy(LArgs, Low(LArgs), AssertFunction.MaxArgCount)].AsBoolean;
 end;
 
 { TParserAnyType }
 
-constructor TParserAnyType.Create(const AName: String; const ATypes: TArray<TParserType>);
+constructor TParserAnyType.Create(const AName: String; const ATypes: TArray<IParserValueConstraint>);
 begin
   inherited Create(AName);
-  FTypes := TObjectList<TParserType>.Create(False);
+  FTypes := TList<IParserValueConstraint>.Create;
   FTypes.AddRange(ATypes);
 end;
 
@@ -919,14 +1053,34 @@ begin
   Create(AName, []);
 end;
 
-function TParserAnyType.GetEnumerator: TEnumerator<TParserType>;
+function TParserAnyType.GetEnumerator: TEnumerator<IParserValueConstraint>;
 begin
   Result := FTypes.GetEnumerator;
 end;
 
+function TParserAnyType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+var
+  LType: IParserValueConstraint;
+begin
+  if inherited then
+  begin
+    Result := True;
+  end else
+  begin
+    for LType in Self do
+    begin
+      if not LType.Included[AType] then
+      begin
+        Exit(False);
+      end;
+    end;
+    Result := True;
+  end;
+end;
+
 function TParserAnyType.GetSupported(const AValue: TParserValue): Boolean;
 var
-  LType: TParserType;
+  LType: IParserValueConstraint;
 begin
   for LType in Self do
   begin
@@ -938,22 +1092,95 @@ begin
   Result := False;
 end;
 
-{ TParserRefType }
+{ TParserValueType }
 
-constructor TParserRefType.Create(const AName: String; const AType: TParserType);
+function TParserValueType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+  Result := inherited or not (AType is TParserReferenceType);
+end;
+
+function TParserValueType.GetSupported(const AValue: TParserValue): Boolean;
+begin
+  Result := AValue.Kind <> vkReference;
+end;
+
+{ TParserReferenceType }
+
+function TParserReferenceType.GetSupported(const AValue: TParserValue): Boolean;
+begin
+  Result := AValue.Kind = vkReference;
+end;
+
+{ TParserVariableReferenceType }
+
+constructor TParserVariableReferenceType.Create(const AName: String; const AVarType: IParserValueConstraint);
 begin
   inherited Create(AName);
-  FType := AType;
+  FVarType := AVarType;
 end;
 
-function TParserRefType.GetSupported(const AValue: TParserValue): Boolean;
+function TParserVariableReferenceType.GetSupported(const AValue: TParserValue): Boolean;
+var
+  LObject: IParserValueRefTarget;
 begin
-  Result := (AValue.Kind = vkReference) and (not Assigned(&Type) or &Type.Supported[AValue]);
+  LObject := AValue.AsReference;
+  Result := inherited and (LObject is TParserVariable) and (not Assigned(VarType) or VarType.Supported[LObject.Value[[]]]);
 end;
 
-constructor TParserRefType.Create(const AName: String);
+{ TParserFunctionReferenceType }
+
+constructor TParserFunctionReferenceType.Create(const AName: String; const AParamTypes: TArray<IParserValueConstraint>);
 begin
-  Create(AName, nil);
+  inherited Create(AName);
+  FParamTypes := TList<IParserValueConstraint>.Create;
+  FParamTypes.AddRange(AParamTypes);
+end;
+
+function TParserFunctionReferenceType.GetEnumerator: TEnumerator<IParserValueConstraint>;
+begin
+  Result := FParamTypes.GetEnumerator;
+end;
+
+function TParserFunctionReferenceType.GetParamTypeCount: Integer;
+begin
+  Result := FParamTypes.Count;
+end;
+
+function TParserFunctionReferenceType.GetParamTypes(const AIndex: Integer): IParserValueConstraint;
+begin
+  Result := FParamTypes[AIndex];
+end;
+
+function TParserFunctionReferenceType.GetSupported(const AValue: TParserValue): Boolean;
+var
+  LIndex: Integer;
+begin
+  if inherited and (AValue.AsReference is TParserFunction) then
+  begin
+    for LIndex := 0 to Pred(ParamTypeCount) do
+    begin
+//      if ParamTypes[LIndex] =  then
+
+    end;
+  end else
+  begin
+    Result := False;
+  end;
+end;
+
+{ TParserTypeReferenceType }
+
+constructor TParserTypeReferenceType.Create(const AName: String; const ATypeConstraint: IParserValueConstraint);
+begin
+  inherited Create(AName);
+  FTypeConstraint := ATypeConstraint;
+end;
+
+function TParserTypeReferenceType.GetSupported(const AValue: TParserValue): Boolean;
+var
+  LObject: IParserValueRefTarget;
+begin
+//  Result := inherited and (Supports(LObject, IParserValueConstraint)) and (not Assigned(TypeConstraint) or TypeConstraint.Included[LObject.Value[[]].AsReference as I]);
 end;
 
 { TParserRangeType }
@@ -969,6 +1196,26 @@ begin
   begin
     FMinValue := AFirstConstraint;
     FMaxValue := ASecondConstraint;
+  end;
+end;
+
+function TParserRangeType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+var
+  LType: TParserRangeType;
+begin
+  if inherited then
+  begin
+    Result := True;
+  end else
+  begin
+    if AType is TParserRangeType then
+    begin
+      LType := AType as TParserRangeType;
+      Result := (TParserValue.Compare(LType.MinValue, MinValue) <> LessThanValue) and (TParserValue.Compare(LType.MaxValue, MaxValue) <> GreaterThanValue);
+    end else
+    begin
+      Result := False;
+    end;
   end;
 end;
 
@@ -1002,6 +1249,34 @@ begin
   Result := FValues.GetEnumerator;
 end;
 
+function TParserEnumType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+var
+  LType: TParserEnumType;
+  LValue: TParserValue;
+begin
+  if inherited then
+  begin
+    Result := True;
+  end else
+  begin
+    if AType is TParserEnumType then
+    begin
+      LType := AType as TParserEnumType;
+      for LValue in LType do
+      begin
+        if not Supported[LValue] then
+        begin
+          Exit(False);
+        end;
+      end;
+      Result := True;
+    end else
+    begin
+      Result := False;
+    end;
+  end;
+end;
+
 function TParserEnumType.GetSupported(const AValue: TParserValue): Boolean;
 begin
   Result := FValues.Contains(AValue);
@@ -1018,6 +1293,11 @@ begin
 end;
 
 { TParserNumberType }
+
+function TParserNumberType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+  Result := inherited or (AType is TParserNumberType);
+end;
 
 function TParserNumberType.GetNew: TParserValue;
 begin
@@ -1068,6 +1348,34 @@ begin
   Result := FDivisors.GetEnumerator;
 end;
 
+function TParserIntegerType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+var
+  LType: TParserIntegerType;
+  LDivisor: TParserValue;
+begin
+  if inherited or (AType is TParserRangeIntegerType) then
+  begin
+    Result := True;
+  end else
+  begin
+    if AType is TParserIntegerType then
+    begin
+      LType := AType as TParserIntegerType;
+      for LDivisor in Self do
+      begin
+        if not LType.FDivisors.Contains(LDivisor) then
+        begin
+          Exit(False);
+        end;
+      end;
+      Result := True;
+    end else
+    begin
+      Result := False;
+    end;
+  end;
+end;
+
 function TParserIntegerType.GetSupported(const AValue: TParserValue): Boolean;
 var
   LDivisor: TParserValue;
@@ -1109,6 +1417,11 @@ begin
   inherited;
 end;
 
+function TParserRangeIntegerType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+  Result := inherited or Integer.Included[AType] or Range.Included[AType];
+end;
+
 function TParserRangeIntegerType.GetSupported(const AValue: TParserValue): Boolean;
 begin
   Result := Integer.Supported[AValue] and Range.Supported[AValue];
@@ -1134,6 +1447,11 @@ begin
   Create(AName, TParserValue.Create(0));
 end;
 
+function TParserStringType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+  Result := inherited or (AType is TParserStringType) and (TParserValue.Compare((AType as TParserStringType).Length, Length) <> GreaterThanValue);
+end;
+
 function TParserStringType.GetNew: TParserValue;
 begin
   Result := TParserValue.Empty[vkString];
@@ -1149,6 +1467,11 @@ end;
 constructor TParserArrayType.Create(const AName: String);
 begin
   inherited;
+end;
+
+function TParserArrayType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+
 end;
 
 function TParserArrayType.GetNew: TParserValue;
@@ -1199,6 +1522,11 @@ end;
 function TParserRecordType.GetFields(const AIndex: Integer): TParserValue;
 begin
   Result := FFields[AIndex];
+end;
+
+function TParserRecordType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+
 end;
 
 function TParserRecordType.GetNew: TParserValue;
@@ -1275,6 +1603,11 @@ begin
   end;
 end;
 
+function TParserObjectType.GetIncluded(const AType: IParserValueConstraint): Boolean;
+begin
+
+end;
+
 function TParserObjectType.GetParentCount: Integer;
 begin
   Result := FParents.Count;
@@ -1297,29 +1630,6 @@ begin
     end;
   end;
   Result := True;
-end;
-
-{ TParserTempType }
-
-procedure TParserTempType.AssertValue(const AValue: TParserValue);
-begin
-  &Type.AssertValue(AValue);
-end;
-
-constructor TParserTempType.Create(const AType: TParserType);
-begin
-  FType := AType;
-end;
-
-destructor TParserTempType.Destroy;
-begin
-  &Type.Free;
-  inherited;
-end;
-
-function TParserTempType.GetSupported(const AValue: TParserValue): Boolean;
-begin
-  Result := &Type.Supported[AValue];
 end;
 
 end.

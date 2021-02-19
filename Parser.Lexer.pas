@@ -7,12 +7,15 @@ uses
   Parser.Exception, Parser.Value, Parser.Syntax;
 
 type
-  TParserTokenKind = (tkUnknown, tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolEq, tkSymbolColon, tkSymbolComma, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText{Str, tkTextChr}, tkName);
+  TParserTokenKind = (tkUnknown, tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolEq, tkSymbolColon, tkSymbolDot, tkSymbolComma, tkSymbolAmp, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText{Str, tkTextChr}, tkName);
 
   TParserTokenKinds = set of TParserTokenKind;
 
   TParserTokenKindHelper = record helper for TParserTokenKind
+  private
+    class function GetAllowedAfter(const ANodeKind: TParserNodeKind): TParserTokenKinds; static;
   public
+    class property AllowedAfter[const ANodeKind: TParserNodeKind]: TParserTokenKinds read GetAllowedAfter;
     constructor Create(const ABeginning: Char);
   end;
 
@@ -88,9 +91,17 @@ begin
       begin
         Self := tkSymbolEq;
       end;
+    '.':
+      begin
+        Self := tkSymbolDot;
+      end;
     ',':
       begin
         Self := tkSymbolComma;
+      end;
+    '&':
+      begin
+        Self := tkSymbolAmp;
       end;
     ':':
       begin
@@ -147,12 +158,31 @@ begin
   end;
 end;
 
+class function TParserTokenKindHelper.GetAllowedAfter(const ANodeKind: TParserNodeKind): TParserTokenKinds;
+const
+  LAllowedTokens: array [TParserNodeKind] of TParserTokenKinds = (
+    [tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolAbs],
+    [],
+    [tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolAbs],
+    [tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs],
+    [],
+    [tkSymbolEq],
+    [],
+    [],
+    [],
+    [],
+    []
+  );
+begin
+  Result := LAllowedTokens[ANodeKind];
+end;
+
 { TParserToken }
 
 constructor TParserToken.Create(const ACharIndex: Integer; const AKind: TParserTokenKind);
 const
   LInfoLengths: array [TParserTokenKind] of Integer = (
-    0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2
+    0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2
   );
 begin
   FCharIndex := ACharIndex;
@@ -183,13 +213,21 @@ begin
       begin
         Result := '=';
       end;
+    tkSymbolColon:
+      begin
+        Result := ':';
+      end;
+    tkSymbolDot:
+      begin
+        Result := '.';
+      end;
     tkSymbolComma:
       begin
         Result := ',';
       end;
-    tkSymbolColon:
+    tkSymbolAmp:
       begin
-        Result := ':';
+        Result := '&';
       end;
     tkSymbolParOp:
       begin
@@ -314,9 +352,16 @@ var
   LCurrentIndex: Integer;
 
   procedure ParseWhitespaces;
+  var
+    LComment: Boolean;
   begin
-    while (LCurrentIndex <= High(Expression)) and CharInSet(Expression[LCurrentIndex], [#9, #10, #13, #32]) do
+    LComment := False;
+    while (LCurrentIndex <= High(Expression)) and (LComment or CharInSet(Expression[LCurrentIndex], [#9, #10, #13, #32, '\'])) do
     begin
+      if Expression[LCurrentIndex] = '\' then
+      begin
+        LComment := not LComment;
+      end;
       Inc(LCurrentIndex);
     end;
   end;
@@ -472,7 +517,7 @@ var
         begin
           ParseSymbolOp;
         end;
-      tkSymbolRef, tkSymbolHash, tkSymbolEq, tkSymbolComma, tkSymbolColon, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs:
+      tkSymbolRef, tkSymbolHash, tkSymbolEq, tkSymbolDot, tkSymbolComma, tkSymbolColon, tkSymbolAmp, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs:
         begin
           ParseSymbolOther;
         end;

@@ -3,26 +3,26 @@ unit Parser.Syntax;
 interface
 
 uses
-  System.SysUtils, System.StrUtils, System.Math, System.Rtti, System.Generics.Collections, System.Generics.Defaults,
+  System.SysUtils, System.StrUtils, System.Types, System.Math, System.Rtti, System.Generics.Collections, System.Generics.Defaults,
   Parser.Exception, Parser.Value;
 
 type
   TParserNode = class;
 
-  TParserNodeKind = (nkNone, nkAbs, nkArgs, nkElements, nkFields, nkIf, nkThen, nkElse, nkTry, nkExcept);
+  TParserNodeKind = (nkNone, nkAbs, nkArgs, nkElements, nkFields, nkFieldName, nkIf, nkThen, nkElse, nkTry, nkExcept);
 
   TParserNodeKindHelper = record helper for TParserNodeKind
   public
-    constructor Create(const ANode: TParserNode);
+    constructor Create(const ANode: TParserNode); overload;
   end;
 
-  TParserKeyword = (kwNone, kw_, kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwRange, kwEnum, kwInt, kwRangeInt, kwAttrib, kwAlias, kwShow, kwDelete, kwAssert, kwLink, kwSpread, kwIf, kwThen, kwElse, kwTry, kwExcept, kwFunc, kwRet);
+  TParserKeyword = (kwNone, kw_, kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwOpt, kwRange, kwEnum, kwInt, kwRangeInt, kwAttrib, kwAlias, kwShow, kwDelete, kwAssert, kwLink, kwSpread, kwIf, kwThen, kwElse, kwTry, kwExcept, kwFunc, kwRet);
 
   TParserKeywords = set of TParserKeyword;
 
   TParserKeywordHelper = record helper for TParserKeyword
   private const
-    FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('_', 'resolve', 'const', 'var', 'inline', 'function', 'type', 'constructor', 'range', 'enum', 'int', 'rangeint', 'attrib', 'alias', 'show', 'delete', 'assert', 'link', 'spread', 'if', 'then', 'else', 'try', 'except', 'func', 'ret');
+    FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('_', 'resolve', 'const', 'var', 'inline', 'function', 'type', 'constructor', 'opt', 'range', 'enum', 'int', 'rangeint', 'attrib', 'alias', 'show', 'delete', 'assert', 'link', 'spread', 'if', 'then', 'else', 'try', 'except', 'func', 'ret');
     class function GetTypeConstructors: TParserKeywords; static;
     class function GetExpressionStarters: TParserKeywords; static;
     class function GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords; static;
@@ -34,13 +34,27 @@ type
     function ToString: String;
   end;
 
-  TParserTypeConstructor = (tcRange, tcEnum, tcInt, tcRangeInt, tcStr, tcArray, tcRecord);
+  TParserTypeParameter = (tpName, tpType, tpValue);
 
-  TParserOperator = (opAdd, opSub, opRnd, opCmp, opMul, opDiv, opMod, opExp);
+  TParserTypeConstructor = (tcAny, tcRef, tcRange, tcEnum, tcInteger, tcRangeInt, tcString, tcArray, tcRecord, tcObject);
+
+  TParserTypeConstructorHelper = record helper for TParserTypeConstructor
+  private
+    function GetMaxArgCount: Integer;
+    function GetMinArgCount: Integer;
+    function GetParams(const AIndex: Integer): TParserTypeParameter;
+  public
+    property Params[const AIndex: Integer]: TParserTypeParameter read GetParams;
+    property MinArgCount: Integer read GetMinArgCount;
+    property MaxArgCount: Integer read GetMaxArgCount;
+    constructor Create(AKeyword: TParserKeyword);
+  end;
+
+  TParserOperator = (opAdd, opSub, opMul, opDiv, opMod, opExp, opRnd, opCmp);
 
   TParserOperators = set of TParserOperator;
 
-  TParserOperatorPrecedence = 0 .. 2;
+  TParserOperatorPrecedence = 0 .. 3;
 
   TParserOperatorHelper = record helper for TParserOperator
   private
@@ -137,12 +151,26 @@ type
     constructor Create(const AParent: TParserParentNode);
   end;
 
-  TParserNamedArgNode = class(TParserArgNode)
+  TParserNamedArgNode = class abstract(TParserArgNode)
+  protected
+    function GetName: String; virtual; abstract;
+  public
+    property Name: String read GetName;
+  end;
+
+  TParserStaticNamedArgNode = class(TParserNamedArgNode)
   private
     FName: String;
+  protected
+    function GetName: String; override;
   public
-    property Name: String read FName;
     constructor Create(const AParent: TParserParentNode; const AName: String);
+  end;
+
+  TParserDynamicNamedArgNode = class(TParserNamedArgNode)
+  protected
+    function GetValue: TParserValue; override;
+    function GetName: String; override;
   end;
 
   TParserValueNode = class(TParserNode)
@@ -181,19 +209,22 @@ type
     function GetValue: TParserValue; override;
   end;
 
-  TParserFuncNode = class(TParserParentNode);
+  TParserFuncNode = class(TParserParentNode)
+  protected
+    function GetValue: TParserValue; override;
+  end;
 
   TParserTree = class
   private
     FValueSuppliers: TArray<IParserValueSupplier>;
-    FNodes: TParserParentNode;
+    FNodes: TParserRootNode;
     function GetValues(const AName: String; const AArgs: TArray<TParserValue>): TParserValue;
     function GetRefTargets(const AName: String): IParserValueRefTarget;
   protected
     property Values[const AName: String; const AArgs: TArray<TParserValue>]: TParserValue read GetValues;
     property RefTargets[const AName: String]: IParserValueRefTarget read GetRefTargets;
   public
-    property Nodes: TParserParentNode read FNodes;
+    property Nodes: TParserRootNode read FNodes;
     constructor Create(const AValueSuppliers: TArray<IParserValueSupplier> = []);
     destructor Destroy; override;
     function GetEnumerator: TEnumerator<TParserNode>; inline;
@@ -202,6 +233,9 @@ type
   end;
 
 implementation
+
+uses
+  Parser.Language;
 
 { TParserNodeKindHelper }
 
@@ -283,7 +317,7 @@ end;
 class function TParserKeywordHelper.GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords;
 const
   LAllowedKeywords: array [TParserNodeKind] of TParserKeywords = (
-    [kwIf, kwTry], [], [kwSpread], [], [], [kwThen], [kwElse], [], [kwExcept], []
+    [kwIf, kwTry], [], [kwSpread], [], [], [], [kwThen], [kwElse], [], [kwExcept], []
   );
 begin
   Result := LAllowedKeywords[ANodeKind];
@@ -292,7 +326,7 @@ end;
 
 class function TParserKeywordHelper.GetExpressionStarters: TParserKeywords;
 begin
-  Result := [kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwAlias, kwShow, kwDelete, kwAssert, kwLink];
+  Result := [kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwAlias, kwOpt, kwShow, kwDelete, kwAssert, kwLink];
 end;
 
 class function TParserKeywordHelper.GetTypeConstructors: TParserKeywords;
@@ -303,6 +337,98 @@ end;
 function TParserKeywordHelper.ToString: String;
 begin
   Result := FKeywords[Self];
+end;
+
+{ TParserTypeConstructorHelper }
+
+constructor TParserTypeConstructorHelper.Create(AKeyword: TParserKeyword);
+begin
+  case AKeyword of
+//    kwAny:
+//      begin
+//        Self := tcAny;
+//      end;
+    kwRange:
+      begin
+        Self := tcRange;
+      end;
+    kwEnum:
+      begin
+        Self := tcRange;
+      end;
+    kwInt:
+      begin
+        Self := tcRange;
+      end;
+    kwRangeInt:
+      begin
+        Self := tcRange;
+      end;
+  end;
+end;
+
+function TParserTypeConstructorHelper.GetMaxArgCount: Integer;
+const
+  LMaxArgCounts: array [TParserTypeConstructor] of Integer = (
+    -1, 2, 2, -1, -1, -1, 1, -1, -1, -1
+  );
+begin
+  Result := LMaxArgCounts[Self];
+end;
+
+function TParserTypeConstructorHelper.GetMinArgCount: Integer;
+const
+  LMinArgCounts: array [TParserTypeConstructor] of Integer = (
+    0, 0, 2, 1, 0, 2, 0, 0, 0, 1
+  );
+begin
+  Result := LMinArgCounts[Self];
+end;
+
+function TParserTypeConstructorHelper.GetParams(const AIndex: Integer): TParserTypeParameter;
+begin
+  case Self of
+    tcAny:
+      begin
+        Result := tpName;
+      end;
+    tcRef:
+      begin
+        Result := tpType;
+      end;
+    tcRange:
+      begin
+        Result := tpValue;
+      end;
+    tcEnum:
+      begin
+        Result := tpValue;
+      end;
+    tcInteger:
+      begin
+        Result := tpValue;
+      end;
+    tcRangeInt:
+      begin
+        Result := tpValue;
+      end;
+    tcString:
+      begin
+        Result := tpValue;
+      end;
+    tcArray:
+      begin
+        Result := tpValue;
+      end;
+    tcRecord:
+      begin
+        Result := tpName;
+      end;
+    tcObject:
+      begin
+        Result := tpType;
+      end;
+  end;
 end;
 
 { TParserOperatorHelper }
@@ -318,14 +444,6 @@ begin
     '-':
       begin
         Self := opSub;
-      end;
-    '~':
-      begin
-        Self := opRnd;
-      end;
-    '?':
-      begin
-        Self := opCmp;
       end;
     '*':
       begin
@@ -343,25 +461,33 @@ begin
       begin
         Self := opExp;
       end;
+    '~':
+      begin
+        Self := opRnd;
+      end;
+    '?':
+      begin
+        Self := opCmp;
+      end;
   end;
 end;
 {$WARN NO_RETVAL ON}
 
 class function TParserOperatorHelper.GetBinaryOperators: TParserOperators;
 begin
-  Result := [opAdd, opSub, opCmp, opMul, opDiv, opExp];
+  Result := [opAdd, opSub, opCmp, opMul, opDiv, opMod, opExp];
 end;
 
 class function TParserOperatorHelper.GetOperators(const APrecedence: TParserOperatorPrecedence): TParserOperators;
 const
-  LOperators: array [TParserOperatorPrecedence] of TParserOperators = ([opAdd, opSub, opRnd, opCmp], [opMul, opDiv, opMod], [opExp]);
+  LOperators: array [TParserOperatorPrecedence] of TParserOperators = ([opAdd, opSub], [opMul, opDiv, opMod], [opExp], [opRnd, opCmp]);
 begin
   Result := LOperators[APrecedence];
 end;
 
 class function TParserOperatorHelper.GetPrecedences(const AOperator: TParserOperator): TParserOperatorPrecedence;
 const
-  LPrecedences: array [TParserOperator] of TParserOperatorPrecedence = (0, 0, 0, 0, 1, 1, 1, 2);
+  LPrecedences: array [TParserOperator] of TParserOperatorPrecedence = (0, 0, 1, 1, 1, 2, 3, 3);
 begin
   Result := LPrecedences[AOperator];
 end;
@@ -401,25 +527,6 @@ end;
 
 {$WARN NO_RETVAL OFF}
 function TParserOperatorHelper.Invoke(const AFirst, ASecond: TParserValue): TParserValue;
-
-  function Subtract(const AFirst, ASecond: TArray<TParserValue>): TArray<TParserValue>;
-  var
-    LResult: TList<TParserValue>;
-    LValue: TParserValue;
-  begin
-    LResult := TList<TParserValue>.Create;
-    try
-      LResult.AddRange(AFirst);
-      for LValue in ASecond do
-      begin
-        LResult.Remove(LValue);
-      end;
-      Result := LResult.ToArray;
-    finally
-      LResult.Free;
-    end;
-  end;
-
 begin
   if not Supported(AFirst, ASecond) then
   begin
@@ -432,16 +539,7 @@ begin
       end;
     opSub:
       begin
-        case AFirst.Kind of
-          vkDouble:
-            begin
-              Result := TParserValue.Create(AFirst.AsDouble - ASecond.AsDouble);
-            end;
-          vkArray:
-            begin
-              Result := TParserValue.Create(Subtract(AFirst.AsArray, ASecond.AsArray));
-            end;
-        end;
+        Result := TParserValue.Subtract(AFirst, ASecond);
       end;
     opCmp:
       begin
@@ -472,9 +570,9 @@ const
   LSupportedUnaryOperators: array [TParserValueKind] of TParserOperators = (
     [opAdd],
     [opAdd, opSub, opRnd, opCmp],
-    [opAdd],
     [opAdd, opSub],
-    [opAdd]
+    [opAdd, opSub],
+    [opAdd, opSub]
   );
 begin
   Result := Self in LSupportedUnaryOperators[AValue.Kind];
@@ -484,10 +582,10 @@ function TParserOperatorHelper.Supported(const AFirst, ASecond: TParserValue): B
 const
   LSupportedBinaryOperators: array [TParserValueKind] of TParserOperators = (
     [],
-    [opAdd, opSub, opCmp, opMul, opDiv, opExp],
+    [opAdd, opSub, opCmp, opMul, opDiv, opMod, opExp],
     [opAdd, opCmp],
-    [opAdd, opSub, opCmp],
-    [opAdd, opCmp]
+    [opAdd, opCmp],
+    [opAdd, opSub, opCmp]
   );
 begin
   Result := (Self in LSupportedBinaryOperators[AFirst.Kind]) and (Self in LSupportedBinaryOperators[ASecond.Kind]);
@@ -495,7 +593,7 @@ end;
 
 function TParserOperatorHelper.ToChar: Char;
 const
-  LOperators: array [TParserOperator] of Char = ('+', '-', '~', '?', '*', '/', '%', '^');
+  LOperators: array [TParserOperator] of Char = ('+', '-', '*', '/', '%', '^', '~', '?');
 begin
   Result := LOperators[Self];
 end;
@@ -518,7 +616,7 @@ end;
 
 function TParserAbsNode.GetValue: TParserValue;
 begin
-  Result := TParserValue.Create(Abs(inherited GetValue.AsDouble));
+  Result := inherited GetValue.Absolute;
 end;
 
 { TParserParentNode }
@@ -587,6 +685,39 @@ function TParserParentNode.GetValue: TParserValue;
 var
   LIndex: Integer;
   LNode: TParserNode;
+
+  function NodeValue(const ANode: TParserNode): TParserValue;
+  var
+    LNextNode: TParserNode;
+  begin
+//    Result := ANode.Value;
+//    if LIndex <> Pred(Count) then
+//    begin
+//      LNextNode := Self[Succ(LIndex)];
+//      if TParserOperator.Precedences[LNextNode.Operator] > TParserOperator.Precedences[ANode.Operator] then
+//      begin
+//        Inc(LIndex);
+//        Result := LNextNode.Operator.Invoke(Result, NodeValue(LNextNode));
+//      end;
+//    end;
+    Result := ANode.Value;
+    while LIndex < Pred(Count) do
+    begin
+      LNextNode := Self[Succ(LIndex)];
+      case CompareValue(TParserOperator.Precedences[LNextNode.Operator], TParserOperator.Precedences[ANode.Operator]) of
+        LessThanValue:
+          begin
+            Exit;
+          end;
+        EqualsValue, GreaterThanValue:
+          begin
+            Inc(LIndex);
+            Result := LNextNode.Operator.Invoke(Result, NodeValue(LNextNode));
+          end;
+      end;
+    end;
+  end;
+
 begin
   inherited;
   if Count = 0 then
@@ -594,13 +725,19 @@ begin
     Result := TParserValue.Empty[vkDouble];
   end else
   begin
+    LIndex := 0;
     LNode := Nodes[0];
-    Result := LNode.&Operator.Invoke(LNode.Value);
-  end;
-  for LIndex := 1 to Pred(Count) do
-  begin
-    LNode := Nodes[LIndex];
-    Result := LNode.&Operator.Invoke(Result, LNode.Value);
+    Result := LNode.&Operator.Invoke(NodeValue(LNode));
+//    if Count > 1 then
+//    begin
+//      Inc(LIndex);
+//      while LIndex < Count do
+//      begin
+//        LNode := Nodes[LIndex];
+//        Result := LNode.&Operator.Invoke(Result, NodeValue(LNode));
+//        Inc(LIndex);
+//      end;
+//    end;
   end;
 end;
 
@@ -669,12 +806,29 @@ begin
   inherited Create(AParent, opAdd);
 end;
 
-{ TParserNamedArgNode }
+{ TParserStaticNamedArgNode }
 
-constructor TParserNamedArgNode.Create(const AParent: TParserParentNode; const AName: String);
+constructor TParserStaticNamedArgNode.Create(const AParent: TParserParentNode; const AName: String);
 begin
   inherited Create(AParent);
   FName := AName;
+end;
+
+function TParserStaticNamedArgNode.GetName: String;
+begin
+  Result := FName;
+end;
+
+{ TParserDynamicNamedArgNode }
+
+function TParserDynamicNamedArgNode.GetName: String;
+begin
+  Result := Self[0].Value.AsString;
+end;
+
+function TParserDynamicNamedArgNode.GetValue: TParserValue;
+begin
+  Result := Self[1].Value;
 end;
 
 { TParserValueNode }
@@ -738,6 +892,13 @@ begin
   except
     Result := Nodes[1].Value;
   end;
+end;
+
+{ TParserFuncNode }
+
+function TParserFuncNode.GetValue: TParserValue;
+begin
+  Result := TParserValue.Create(TParserFunctionDelegate.Create([], nil));
 end;
 
 { TParserTree }

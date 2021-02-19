@@ -3,11 +3,11 @@ unit Parser.Value;
 interface
 
 uses
-  System.SysUtils, System.Types, System.Math, System.Generics.Collections, System.Generics.Defaults, System.Rtti,
+  System.SysUtils, System.Types, System.Math, System.Character, System.Generics.Collections, System.Generics.Defaults, System.Rtti,
   Parser.Exception;
 
 type
-  TParserValueKind = (vkReference, vkDouble, vkString, vkArray, vkRecord{, vkReference});
+  TParserValueKind = (vkReference, vkDouble, vkString, vkArray, vkRecord);
 
   IParserValueRefTarget = interface;
 
@@ -23,6 +23,7 @@ type
     class function GetNewRecord(const AFields: TArray<String>): TParserValue; static;
     function GetKind: TParserValueKind;
     function GetMembers(const AKey: TParserValue): TParserValue;
+    function GetKeys: TArray<TParserValue>;
     function GetAsReference: IParserValueRefTarget;
     procedure SetAsReference(const AValue: IParserValueRefTarget);
     function GetAsDouble: Double;
@@ -55,6 +56,7 @@ type
     property Kind: TParserValueKind read GetKind;
     property Count: Integer read GetCount;
     property Members[const AKey: TParserValue]: TParserValue read GetMembers; default;
+    property Keys: TArray<TParserValue> read GetKeys;
     property IsNaN: Boolean read GetIsNaN;
     property IsPosInf: Boolean read GetIsPosInf;
     property IsNegInf: Boolean read GetIsNegInf;
@@ -71,8 +73,11 @@ type
     constructor Create(const ARecord: TArray<TPair<String, TParserValue>>); overload;
     function ToString: String;
     function HasMember(const AKey: TParserValue): Boolean;
+    function Find(const AValue: TParserValue; out AKey: TParserValue): Boolean;
+    function Copy(const AFrom, ATo: TParserValue): TParserValue;
     function Equals(const AValue: TParserValue): Boolean;
     function Negate: TParserValue;
+    function &Absolute: TParserValue;
   end;
 
   TParserValueHelper = record helper for TParserValue
@@ -96,16 +101,27 @@ type
   private
     function GetAsDoubles: TArray<Double>;
     function GetAsStrings: TArray<String>;
+    function GetAsArrays: TArray<TArray<TParserValue>>;
+    function GetAsRecords: TArray<TArray<TPair<String, TParserValue>>>;
+    function GetAsReferences: TArray<IParserValueRefTarget>;
   public
+    property AsReferences: TArray<IParserValueRefTarget> read GetAsReferences;
     property AsDoubles: TArray<Double> read GetAsDoubles;
     property AsStrings: TArray<String> read GetAsStrings;
-    class function Create(const AString: String): TArray<TParserValue>; static;
+    property AsArrays: TArray<TArray<TParserValue>> read GetAsArrays;
+    property AsRecords: TArray<TArray<TPair<String, TParserValue>>> read GetAsRecords;
+    constructor Create(const AString: String); overload;
+    constructor Create(const AFrom, ATo, AStep: Double); overload;
   end;
 
   IParserValueConstraint = interface
     ['{0E0905C6-427E-41FC-92EE-F31A0FC73AF4}']
     function GetSupported(const AValue: TParserValue): Boolean;
+    function GetIncluded(const AType: IParserValueConstraint): Boolean;
+    function GetNew: TParserValue;
     property Supported[const AValue: TParserValue]: Boolean read GetSupported;
+    property Included[const AType: IParserValueConstraint]: Boolean read GetIncluded;
+    property New: TParserValue read GetNew;
     procedure AssertValue(const AValue: TParserValue);
   end;
 
@@ -152,6 +168,55 @@ end;
 constructor TParserValue.Create(const AString: String);
 begin
   AsString := AString;
+end;
+
+function TParserValue.Absolute: TParserValue;
+
+  function AbsoluteArray(const AArray: TArray<TParserValue>): TArray<TParserValue>;
+  var
+    LIndex: Integer;
+  begin
+    SetLength(Result, Length(AArray));
+    for LIndex := Low(AArray) to High(AArray) do
+    begin
+      Result[LIndex] := AArray[LIndex].Absolute;
+    end;
+  end;
+
+  function AbsoluteRecord(const ARecord: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+  var
+    LIndex: Integer;
+  begin
+    SetLength(Result, Length(ARecord));
+    for LIndex := Low(ARecord) to High(ARecord) do
+    begin
+      Result[LIndex] := TPair<String, TParserValue>.Create(ARecord[LIndex].Key, ARecord[LIndex].Value.Absolute);
+    end;
+  end;  
+
+begin
+  case Kind of
+    vkDouble:
+      begin
+        Result := TParserValue.Create(Abs(AsDouble));
+      end;
+    vkString:
+      begin
+        Result := TParserValue.Create(AsString.ToUpper);
+      end;
+    vkArray:
+      begin
+        Result := TParserValue.Create(AbsoluteArray(AsArray));
+      end;
+    vkRecord:
+      begin
+        Result := TParserValue.Create(AbsoluteRecord(AsRecord));
+      end;
+    else
+      begin
+        raise EParserValueAbsolutionError.CreateFmt('Absolution not supported for: %s', [ToString.QuotedString]);
+      end;
+  end;
 end;
 
 class function TParserValue.Add(const AFirst, ASecond: TParserValue): TParserValue;
@@ -204,14 +269,14 @@ begin
   end;
 end;
 
-{$WARN NO_RETVAL OFF}
 class function TParserValue.Compare(const AFirst, ASecond: TParserValue): TValueRelationship;
 
   function CompareArray(const AFirst, ASecond: TArray<TParserValue>): TValueRelationship;
   var
     LIndex: Integer;
   begin
-    if Length(AFirst) = Length(ASecond) then
+    Result := CompareValue(Length(AFirst), Length(ASecond));
+    if Result = EqualsValue then
     begin
       for Lindex := Low(AFirst) to High(AFirst) do
       begin
@@ -221,15 +286,72 @@ class function TParserValue.Compare(const AFirst, ASecond: TParserValue): TValue
           Exit;
         end;
       end;
-    end else
-    begin
-      Result := CompareValue(Length(AFirst), Length(ASecond));
     end;
   end;
 
   function CompareRecord(const AFirst, ASecond: TArray<TPair<String, TParserValue>>): TValueRelationship;
+  var
+    LField: TPair<String, TParserValue>;
+    LLeftFields: TDictionary<String, TParserValue>;
+    LRightFields: TDictionary<String, TParserValue>;
+    LRelationship: TValueRelationship;
   begin
-    Result := EqualsValue;
+    LLeftFields := TDictionary<String, TParserValue>.Create(Length(AFirst), TIStringComparer.Ordinal);
+    try
+      LRightFields := TDictionary<String, TParserValue>.Create(Length(ASecond), TIStringComparer.Ordinal);
+      try
+        for LField in AFirst do
+        begin
+          LLeftFields.Add(LField.Key, LField.Value);
+        end;
+        for LField in ASecond do
+        begin
+          LRightFields.Add(LField.Key, LField.Value);
+        end;
+        Result := CompareValue(LLeftFields.Count, LRightFields.Count);
+        if Result <> GreaterThanValue then
+        begin
+          for LField in LLeftFields do
+          begin
+            if not LRightFields.ContainsKey(LField.Key) then
+            begin
+              Result := GreaterThanValue;
+            end;
+          end;
+        end;
+        for LField in LRightFields do
+        begin
+          if not LLeftFields.ContainsKey(LField.Key) then
+          begin
+            if Result = GreaterThanValue then
+            begin
+              raise EParserValueComparisonError.Create('Incomparable values');
+            end;
+            Result := LessThanValue;
+          end;
+        end;
+        if Result = EqualsValue then
+        begin
+          for LField in LLeftFields do
+          begin
+            LRelationship := Compare(LField.Value, LRightFields[LField.Key]);
+//            if not (LRelationship in [EqualsValue, Result]) then  //Cannot use here, Delphi compiler bug??
+           if not ((LRelationship = EqualsValue) or (LRelationship = Result)) then
+            begin
+              if not (Result in [EqualsValue, LRelationship]) then
+              begin
+                raise EParserValueComparisonError.Create('Incomparable values');
+              end;
+              Result := LRelationship;
+            end;
+          end;
+        end;
+      finally
+        LRightFields.Free;
+      end;
+    finally
+      LLeftFields.Free;
+    end;
   end;
 
 begin
@@ -258,16 +380,55 @@ begin
       begin
         Result := CompareRecord(AFirst.AsRecord, ASecond.AsRecord);
       end;
+    else
+      begin
+        raise EParserValueComparisonError.Create('Incomparable values');
+      end;
   end;
 end;
-{$WARN NO_RETVAL ON}
+
+function TParserValue.Copy(const AFrom, ATo: TParserValue): TParserValue;
+var
+  LValue: TPair<String, TParserValue>;
+  LValues: TList<TPair<String, TParserValue>>;
+begin
+  if not HasMember(AFrom) then
+  begin
+    raise EParserValueMemberError.CreateFmt('Member %s not found', [AFrom.ToString.QuotedString]);
+  end;
+  if not HasMember(ATo) then
+  begin
+    raise EParserValueMemberError.CreateFmt('Member %s not found', [ATo.ToString.QuotedString]);
+  end;
+  case Kind of
+    vkString:
+      begin
+        Result := TParserValue.Create(AsString.Substring(AFrom.AsInteger, Succ(ATo.AsInteger - AFrom.AsInteger)));
+      end;
+    vkArray:
+      begin
+        Result := TParserValue.Create(System.Copy(AsArray, AFrom.AsInteger, Succ(ATo.AsInteger - AFrom.AsInteger)));
+      end;
+    vkRecord:
+      begin
+        LValues := TList<TPair<String, TParserValue>>.Create;
+        for LValue in AsRecord do
+        begin
+          if (String.Compare(LValue.Key, AFrom.AsString, True) <> LessThanValue) and (String.Compare(LValue.Key, ATo.AsString, True) <> GreaterThanValue) then
+          begin
+            LValues.Add(LValue);
+          end;
+        end;
+        Result := TParserValue.Create(LValues.ToArray);
+      end;
+  end;
+end;
 
 constructor TParserValue.Create(const AArray: TArray<TParserValue>);
 begin
-  AsArray := Copy(AArray);
+  AsArray := System.Copy(AArray);
 end;
 
-{$WARN NO_RETVAL OFF}
 function TParserValue.Equals(const AValue: TParserValue): Boolean;
 
   function SameArray(const AFirst, ASecond: TArray<TParserValue>): Boolean;
@@ -344,37 +505,69 @@ begin
         begin
           Result := SameRecord(AValue.AsRecord, AsRecord);
         end;
+      else
+        begin
+          raise EParserValueComparisonError.Create('Incomparable values');
+        end;
     end;
   end else
   begin
     Result := False;
   end;
 end;
-{$WARN NO_RETVAL ON}
 
 class function TParserValue.Exponentiate(const AFirst, ASecond: TParserValue): TParserValue;
 begin
 
 end;
 
-function TParserValue.GetAsArray: TArray<TParserValue>;
-
-  function StringToArray(const AString: String): TArray<TParserValue>;
-  var
-    LIndex: Integer;
-  begin
-    SetLength(Result, Length(AString));
-    for LIndex := Low(Result) to High(Result) do
-    begin
-      Result[LIndex] := TParserValue.Create(AString.Chars[LIndex]);
-    end;
-  end;
-
+function TParserValue.Find(const AValue: TParserValue; out AKey: TParserValue): Boolean;
+var
+  LIndex: Integer;
+  LField: TPair<String, TParserValue>;
 begin
   case Kind of
     vkString:
       begin
-        Result := StringToArray(FValue.AsString);
+        LIndex := AsString.IndexOf(AValue.AsString);
+        AKey := TParserValue.Create(LIndex);
+        Result := LIndex <> -1;
+      end;
+    vkArray:
+      begin
+        Result := TArray.BinarySearch<TParserValue>(AsArray, AValue, LIndex, TComparer<TParserValue>.Construct(
+          function (const Left, Right: TParserValue): Integer
+          begin
+            Result := TParserValue.Compare(Left, Right);
+          end
+        ));
+        AKey := TParserValue.Create(LIndex);
+      end;
+    vkRecord:
+      begin
+        for LField in AsRecord do
+        begin
+          if LField.Value.Equals(AValue) then
+          begin
+            AKey := TParserValue.Create(LField.Key);
+            Exit(True);
+          end;
+        end;
+        Result := False;
+      end;
+    else
+      begin
+        raise EParserValueMemberError.Create('Value does not support members');
+      end;
+  end;
+end;
+
+function TParserValue.GetAsArray: TArray<TParserValue>;
+begin
+  case Kind of
+    vkString:
+      begin
+        Result := TArray<TParserValue>.Create(FValue.AsString);
       end;
     vkArray:
       begin
@@ -521,6 +714,37 @@ begin
   Result := (Kind = vkDouble) and AsDouble.IsPositiveInfinity;
 end;
 
+function TParserValue.GetKeys: TArray<TParserValue>;
+
+  function RecordKeys(const ARecord: TArray<TPair<String, TParserValue>>): TArray<TParserValue>;
+  var
+    LIndex: Integer;
+  begin
+    SetLength(Result, Length(ARecord));
+    for LIndex := Low(ARecord) to High(ARecord) do
+    begin
+      Result[LIndex] := TParserValue.Create(ARecord[LIndex].Key);
+    end;
+  end;
+
+begin
+  SetLength(Result, Count);
+  case Kind of
+    vkString, vkArray:
+      begin
+        Result := TArray<TParserValue>.Create(0, Pred(Count), 1);
+      end;
+    vkRecord:
+      begin
+        Result := RecordKeys(AsRecord);
+      end;
+    else
+      begin
+        raise EParserValueMemberError.Create('Value does not support members');
+      end;
+  end;
+end;
+
 function TParserValue.GetKind: TParserValueKind;
 begin
   if FValue.IsType<IParserValueRefTarget>(False) then
@@ -640,11 +864,14 @@ begin
       end;
     vkRecord:
       begin
-        for LValue in AsRecord do
+        if AKey.Kind = vkString then
         begin
-          if SameText(LValue.Key, AKey.AsString) then
+          for LValue in AsRecord do
           begin
-            Exit(True);
+            if SameText(LValue.Key, AKey.AsString) then
+            begin
+              Exit(True);
+            end;
           end;
         end;
         Result := False;
@@ -663,25 +890,48 @@ end;
 
 function TParserValue.Negate: TParserValue;
 
-  function NegateArray(const AElements: TArray<TParserValue>): TArray<TParserValue>;
+  function NegateString(const AString: String): String;
   var
     LIndex: Integer;
   begin
-    SetLength(Result, Length(AElements));
-    for LIndex := Low(AElements) to High(AElements) do
+    SetLength(Result, Length(AString));
+    for LIndex := Low(AString) to High(AString) do
     begin
-      Result[LIndex] := AElements[LIndex].Negate;
+      if AString[LIndex].IsLower then
+      begin
+        Result[LIndex] := AString[LIndex].ToUpper;
+      end else
+      begin
+        if AString[LIndex].IsUpper then
+        begin
+          Result[LIndex] := AString[LIndex].ToLower;
+        end else
+        begin
+          Result[LIndex] := AString[LIndex];
+        end;
+      end;
     end;
   end;
 
-  function NegateRecord(const AElements: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+  function NegateArray(const AArray: TArray<TParserValue>): TArray<TParserValue>;
   var
     LIndex: Integer;
   begin
-    SetLength(Result, Length(AElements));
-    for LIndex := Low(AElements) to High(AElements) do
+    SetLength(Result, Length(AArray));
+    for LIndex := Low(AArray) to High(AArray) do
     begin
-      Result[LIndex] := TPair<String, TParserValue>.Create(AElements[LIndex].Key, AElements[LIndex].Value.Negate);
+      Result[LIndex] := AArray[LIndex].Negate;
+    end;
+  end;
+
+  function NegateRecord(const ARecord: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+  var
+    LIndex: Integer;
+  begin
+    SetLength(Result, Length(ARecord));
+    for LIndex := Low(ARecord) to High(ARecord) do
+    begin
+      Result[LIndex] := TPair<String, TParserValue>.Create(ARecord[LIndex].Key, ARecord[LIndex].Value.Negate);
     end;
   end;
 
@@ -690,6 +940,10 @@ begin
     vkDouble:
       begin
         Result := TParserValue.Create(-AsDouble);
+      end;
+    vkString:
+      begin
+        Result := TParserValue.Create(NegateString(AsString));
       end;
     vkArray:
       begin
@@ -753,14 +1007,32 @@ end;
 
 class function TParserValue.Subtract(const AFirst, ASecond: TParserValue): TParserValue;
 
-  function SubtractArrays(const AFirst, ASecond: TArray<TParserValue>): TArray<TParserValue>;
-  begin
-
-  end;
-
   function SubtractRecords(const AFirst, ASecond: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+  var
+    LField: TPair<String, TParserValue>;
+    LFields: TDictionary<String, TParserValue>;
+    LValue: TParserValue;
   begin
-
+    LFields := TDictionary<String, TParserValue>.Create(Length(AFirst), TIStringComparer.Ordinal);
+    try
+      for LField in AFirst do
+      begin
+        LFields.Add(LField.Key, LField.Value);
+      end;
+      for LField in ASecond do
+      begin
+        if LFields.TryGetValue(LField.Key, LValue) then
+        begin
+          LFields[LField.Key] := TParserValue.Subtract(LValue, LField.Value);
+        end else
+        begin
+          LFields.Add(LField.Key, LField.Value.Negate);
+        end;
+      end;
+      Result := LFields.ToArray;
+    finally
+      LFields.Free;
+    end;
   end;
 
 begin
@@ -768,10 +1040,6 @@ begin
     vkDouble:
       begin
         Result := TParserValue.Create(AFirst.AsDouble - ASecond.AsDouble);
-      end;
-    vkArray:
-      begin
-        Result := TParserValue.Create(SubtractArrays(AFirst.AsArray, ASecond.AsArray));
       end;
     vkRecord:
       begin
@@ -852,14 +1120,36 @@ end;
 
 { TParserValuesHelper }
 
-class function TParserValuesHelper.Create(const AString: String): TArray<TParserValue>;
+constructor TParserValuesHelper.Create(const AString: String);
 var
   LIndex: Integer;
 begin
-  SetLength(Result, Length(AString));
-  for LIndex := Low(AString) to High(AString) do
+  SetLength(Self, Length(AString));
+  for LIndex := Low(Self) to High(Self) do
   begin
-    Result[LIndex] := TParserValue.Create(AString[LIndex]);
+    Self[LIndex] := TParserValue.Create(AString.Chars[LIndex]);
+  end;
+end;
+
+constructor TParserValuesHelper.Create(const AFrom, ATo, AStep: Double);
+var
+  LIndex: Integer;
+begin
+  SetLength(Self, Succ(Trunc((ATo - AFrom) / AStep)));
+  for LIndex := Low(Self) to High(Self) do
+  begin
+    Self[LIndex] := TParserValue.Create(AFrom + AStep * LIndex);
+  end;
+end;
+
+function TParserValuesHelper.GetAsArrays: TArray<TArray<TParserValue>>;
+var
+  LIndex: Integer;
+begin
+  SetLength(Result, Length(Self));
+  for LIndex := Low(Self) to High(Self) do
+  begin
+    Result[LIndex] := Self[LIndex].AsArray;
   end;
 end;
 
@@ -871,6 +1161,28 @@ begin
   for LIndex := Low(Self) to High(Self) do
   begin
     Result[LIndex] := Self[LIndex].AsDouble;
+  end;
+end;
+
+function TParserValuesHelper.GetAsRecords: TArray<TArray<TPair<String, TParserValue>>>;
+var
+  LIndex: Integer;
+begin
+  SetLength(Result, Length(Self));
+  for LIndex := Low(Self) to High(Self) do
+  begin
+    Result[LIndex] := Self[LIndex].AsRecord;
+  end;
+end;
+
+function TParserValuesHelper.GetAsReferences: TArray<IParserValueRefTarget>;
+var
+  LIndex: Integer;
+begin
+  SetLength(Result, Length(Self));
+  for LIndex := Low(Self) to High(Self) do
+  begin
+    Result[LIndex] := Self[LIndex].AsReference;
   end;
 end;
 

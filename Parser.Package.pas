@@ -468,6 +468,7 @@ var
   end;
   LTypes: record
     Any: TParserAnyType;
+    Value: TParserValueType;
     Number: TParserNumberType;
     Positive: TParserRangeType;
     Negative: TParserRangeType;
@@ -476,11 +477,12 @@ var
     NegInt: TParserRangeIntegerType;
     RoundRange: TParserRangeIntegerType;
     TypeKind: TParserEnumType;
-    Ref: TParserRefType;
+    Ref: TParserReferenceType;
     Boolean: TParserEnumType;
     Struct: TParserStructType;
     &String: TParserStringType;
     &Array: TParserArrayType;
+    &Record: TParserRecordType;
     Exception: TParserRecordType;
   end;
 begin
@@ -500,6 +502,7 @@ begin
   LConstants.ArrayType := TParserConstant.Create('ArrayType', TParserValue.Create(Ord(vkArray)));
   LConstants.RecordType := TParserConstant.Create('RecordType', TParserValue.Create(Ord(vkRecord)));
   LTypes.Any := TParserAnyType.Create('Any');
+  LTypes.Value := TParserValueType.Create('Value');
   LTypes.Number := TParserNumberType.Create('Number');
   LTypes.Positive := TParserRangeType.Create('Positive', TParserValue.Empty[vkDouble], LConstants.Inf.Value[[]]);
   LTypes.Negative := TParserRangeType.Create('Negative', TParserValue.Create(-LConstants.Inf.Value[[]].AsDouble), TParserValue.Empty[vkDouble]);
@@ -508,7 +511,7 @@ begin
   LTypes.NegInt := TParserRangeIntegerType.Create('NegInt', LTypes.Negative.MinValue, LTypes.Negative.MaxValue);
   LTypes.RoundRange := TParserRangeIntegerType.Create('RoundRange', TParserValue.Create(Low(TRoundToEXRangeExtended)), TParserValue.Create(High(TRoundToEXRangeExtended)));
   LTypes.TypeKind := TParserEnumType.Create('TypeKind', [LConstants.NumberType.Value[[]], LConstants.StringType.Value[[]],  LConstants.ArrayType.Value[[]], LConstants.RecordType.Value[[]]]);
-  LTypes.Ref := TParserRefType.Create('Ref');
+  LTypes.Ref := TParserReferenceType.Create('Ref');
   LTypes.Boolean := TParserEnumType.Create('Boolean', [LConstants.False.Value[[]], LConstants.True.Value[[]]]);
   LTypes.Struct := TParserStructType.Create('Struct');
   LTypes.&String := TParserStringType.Create('String');
@@ -541,6 +544,7 @@ begin
   FDefaultPackage.Dictionary.Add(LConstants.ArrayType);
   FDefaultPackage.Dictionary.Add(LConstants.RecordType);
   FDefaultPackage.Dictionary.Add(LTypes.Any);
+  FDefaultPackage.Dictionary.Add(LTypes.Value);
   FDefaultPackage.Dictionary.Add(LTypes.Number);
   FDefaultPackage.Dictionary.Add(LTypes.Positive);
   FDefaultPackage.Dictionary.Add(LTypes.Negative);
@@ -557,18 +561,28 @@ begin
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('New', [TParserParam.Create('T')],
     function (Params: TArray<TParserValue>): TParserValue
     begin
-      Result := (Params[0].AsReference as TParserType).New;
+      Result := (Params[0].AsReference as IParserValueConstraint).New;
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Is', [TParserParam.Create('Value'), TParserParam.Create('T')],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Supports', [TParserParam.Create('T'), TParserParam.Create('Value')],
     function (Params: TArray<TParserValue>): TParserValue
     begin
-      Result := TParserValue.Create((Params[1].AsReference as TParserType).Supported[Params[0]]);
+      Result := TParserValue.Create((Params[0].AsReference as TParserType).Supported[Params[1]]);
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Includes', [TParserParam.Create('Parent'), TParserParam.Create('Child')],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+      Result := TParserValue.Create((Params[0].AsReference as TParserType).Included[Params[1].AsReference as TParserType]);
     end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('TypeOf', [TParserParam.Create('Value')],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Ord(Params[0].Kind));
     end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('ValueOf', [TParserParam.Create('Reference', LTypes.Ref), TParserParam.Create('Args')],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+      Result := Params[0].AsReference.Value[Copy(Params, 1, High(Params))];
+    end, True));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('NameOf', [TParserParam.Create('Object', LTypes.Ref)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
@@ -686,27 +700,27 @@ begin
         Result := TParserValue.Create(Result.AsInteger xor Params[LIndex].AsInteger);
       end;
     end, True));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Round', [TParserParam.Create('X'), TParserParam.Create('Digit', TParserValue.Empty[vkDouble], LTypes.RoundRange)],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Round', [TParserParam.Create('X', LTypes.Number), TParserParam.Create('Digit', TParserValue.Empty[vkDouble], LTypes.RoundRange)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(RoundTo(Params[0].AsDouble, Params[1].AsInteger));
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Ceil', [TParserParam.Create('X')],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Ceil', [TParserParam.Create('X', LTypes.Number)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Ceil(Params[0].AsDouble));
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Floor', [TParserParam.Create('X')],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Floor', [TParserParam.Create('X', LTypes.Number)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Floor(Params[0].AsDouble));
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Trunc', [TParserParam.Create('X')],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Trunc', [TParserParam.Create('X', LTypes.Number)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Trunc(Params[0].AsDouble));
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Frac', [TParserParam.Create('X')],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Frac', [TParserParam.Create('X', LTypes.Number)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Frac(Params[0].AsDouble));
@@ -772,6 +786,78 @@ begin
     begin
       Result := TParserValue.Create(Params[0].Count);
     end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Sort', [TParserParam.Create('Value', LTypes.&Array)],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+      Result := TParserValue.Create(Params[0].AsArray);
+      TArray.Sort<TParserValue>(Result.AsArray, TComparer<TParserValue>.Construct(
+        function (const Left, Right: TParserValue): Integer
+        begin
+          Result := TParserValue.Compare(Left, Right);
+        end));
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Keys', [TParserParam.Create('Value', LTypes.Struct)],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+      Result := TParserValue.Create(Params[0].Keys);
+    end));
+//  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Values', [TParserParam.Create('Value', LTypes.Record), TParserParam.Create('From'), TParserParam.Create('To')],
+//    function (Params: TArray<TParserValue>): TParserValue
+//    begin
+//      Result := Params[0].Copy(Params[1], Params[2]);
+//    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Copy', [TParserParam.Create('Value', LTypes.Struct), TParserParam.Create('From'), TParserParam.Create('To')],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+      Result := Params[0].Copy(Params[1], Params[2]);
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Map', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('MapFunction', LTypes.Ref)],
+    function (Params: TArray<TParserValue>): TParserValue
+    var
+      LValues: TArray<TParserValue>;
+    begin
+
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Filter', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('FilterRef', LTypes.Ref)],
+    function (Params: TArray<TParserValue>): TParserValue
+    begin
+
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Reduce', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('ReduceFunction', LTypes.Ref)],
+    function (Params: TArray<TParserValue>): TParserValue
+
+      procedure ReduceArray;
+      var
+        LMember: TParserValue;
+      begin
+        for LMember in Params[0].AsArray do
+        begin
+
+        end;
+      end;
+
+      procedure ReduceRecord;
+      var
+        LField: TPair<String, TParserValue>;
+      begin
+        for LField in Params[0].AsRecord do
+        begin
+
+        end;
+      end;
+
+    begin
+      case Params[0].Kind of
+        vkString, vkArray:
+          begin
+            ReduceArray;
+          end;
+        vkRecord:
+          begin
+            ReduceRecord;
+          end;
+      end;
+    end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Join', [TParserParam.Create('Values', LTypes.&Array), TParserParam.Create('Separator', TParserValue.Empty[vkString], LTypes.&String)],
     function (Params: TArray<TParserValue>): TParserValue
     var
@@ -795,34 +881,47 @@ begin
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Format', [TParserParam.Create('Text', LTypes.&String), TParserParam.Create('Args', LTypes.&Array)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
-      //Result := TParserValue.Create();
+//      Result := TParserValue.Create(String.Format(Params[0].AsString, Params[1].AsArray.AsConsts));
     end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Replace', [TParserParam.Create('Text', LTypes.&String), TParserParam.Create('Old', LTypes.&String), TParserParam.Create('New', LTypes.&String)],
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Params[0].AsString.Replace(Params[1].AsString, Params[2].AsString));
     end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Flatten', [TParserParam.Create('Value', LTypes.&String)],
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Flatten', [TParserParam.Create('Value', LTypes.Struct)],
     function (Params: TArray<TParserValue>): TParserValue
 
-      function Flatten(AValues: TArray<TParserValue>): TArray<TParserValue>;
-      var
-        LValue: TParserValue;
-      begin
-        for LValue in AValues do
+      function Flatten(AValue: TParserValue): TParserValue;
+
+        function FlattenArray(const AArray: TArray<TParserValue>): TArray<TParserValue>;
         begin
-          if LValue.Kind = vkArray then
-          begin
-            Result := Concat(Result, Flatten(LValue.AsArray));
-          end else
-          begin
-            Result := Concat(Result, [LValue]);
-          end;
+
+        end;
+
+        function FlattenRecord(const ARecordy: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+        begin
+
+        end;
+
+      begin
+        case AValue.Kind of
+          vkArray:
+            begin
+              Result := TParserValue.Create(FlattenArray(AValue.AsArray));
+            end;
+          vkRecord:
+            begin
+              Result := TParserValue.Create(FlattenRecord(AValue.AsRecord));
+            end;
+          else
+            begin
+              Result := AValue;
+            end;
         end;
       end;
 
     begin
-      Result := TParserValue.Create(Flatten(Params[0].AsArray));
+      Result := Flatten(Params[0]);
     end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Char', [TParserParam.Create('X', LTypes.PosInt)],
     function (Params: TArray<TParserValue>): TParserValue
@@ -843,6 +942,13 @@ begin
     function (Params: TArray<TParserValue>): TParserValue
     begin
       Result := TParserValue.Create(Params[0].HasMember(Params[1]));
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Contains', [TParserParam.Create('Value', LTypes.Struct), TParserParam.Create('Member')],
+    function (Params: TArray<TParserValue>): TParserValue
+    var
+      LKeyDummy: TParserValue;
+    begin
+      Result := TParserValue.Create(Params[0].Find(Params[1], LKeyDummy));
     end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Assigned', [TParserParam.Create('Value')],
     function (Params: TArray<TParserValue>): TParserValue
@@ -933,7 +1039,7 @@ begin
       begin
         if TParserValue.Compare(Params[Pred(LIndex)], Params[LIndex]) <> LessThanValue then
         begin
-          Exit(LConstants.False.Value[[]]);
+          Exit(TParserValue.Create(False));
         end;
       end;
       Result := LConstants.True.Value[[]];
@@ -947,7 +1053,21 @@ begin
       begin
         if TParserValue.Compare(Params[Pred(LIndex)], Params[LIndex]) <> GreaterThanValue then
         begin
-          Exit(LConstants.False.Value[[]]);
+          Exit(TParserValue.Create(False));
+        end;
+      end;
+      Result := LConstants.True.Value[[]];
+    end, True));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Equal', [TParserParam.Create('First'), TParserParam.Create('Next')],
+    function (Params: TArray<TParserValue>): TParserValue
+    var
+      LIndex: Integer;
+    begin
+      for LIndex := Succ(Low(Params)) to High(Params) do
+      begin
+        if not Params[Pred(LIndex)].Equals(Params[LIndex]) then
+        begin
+          Exit(TParserValue.Create(False));
         end;
       end;
       Result := LConstants.True.Value[[]];

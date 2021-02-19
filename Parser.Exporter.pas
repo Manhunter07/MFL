@@ -53,8 +53,10 @@ type
   private const
     FDeclPatternIntro = '%s %s';
     FDeclPatternValue = ' = %s';
-    FDeclPatternType = '%s: %s';
+    FDeclPatternType = ': %s';
     FDeclPatternParams = '(%s)';
+  private
+    function SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
   protected
     class function ReferenceToString(const AReference: IParserValueRefTarget): String; override;
     class function DoubleToString(const ADouble: Double): String; override;
@@ -336,27 +338,33 @@ end;
 procedure TParserCodeExporter.ExportFunction(const AFunction: TParserFunction; const AKind: TParserFunctionKind = fkFunction);
 const
   LKeywords: array [TParserFunctionKind] of String = ('function', 'constructor');
-  LBuiltInBody = '<built-in>';
+  LBuiltInBody = '\built-in\';
 var
   LIndex: Integer;
   LParams: TStringList;
+  LParam: TParserParam;
   LBuilder: TStringBuilder;
   LBody: String;
 begin
   LParams := TStringList.Create;
   try
-    for LIndex := 0 to Pred(AFunction.ParamCount) do
-    begin
-      if Assigned(AFunction.ArgTypes[LIndex]) then
-      begin
-        LParams.Add(String.Format(FDeclPatternType, [AFunction.ParamNames[LIndex], (AFunction.ArgTypes[LIndex] as TParserType).Name]));
-      end else
-      begin
-        LParams.Add(AFunction.ParamNames[LIndex]);
-      end;
-    end;
     LBuilder := TStringBuilder.Create;
     try
+      for LIndex := 0 to Pred(AFunction.ParamCount) do
+      begin
+        LParam := AFunction.Params[AFunction.ParamNames[LIndex]];
+        LBuilder.Append(LParam.Name);
+        if poType in LParam.Options then
+        begin
+          LBuilder.AppendFormat(FDeclPatternType, [(AFunction.ArgTypes[LIndex] as TParserType).Name]);
+        end;
+        if poDefault in LParam.Options then
+        begin
+          LBuilder.AppendFormat(FDeclPatternValue, [LParam.Default.ToString]);
+        end;
+        LParams.Add(LBuilder.ToString);
+        LBuilder.Clear;
+      end;
       LBuilder.AppendFormat(FDeclPatternIntro, [LKeywords[AKind], AFunction.Name]);
       if LParams.Count <> 0 then
       begin
@@ -364,7 +372,7 @@ begin
       end;
       if AFunction is TParserCustomFunction then
       begin
-        // ToDo: Export syntax tree
+        LBody := SyntaxTreeToString((AFunction as TParserCustomFunction).SyntaxTree);
       end else
       begin
         LBody := LBuiltInBody;
@@ -518,6 +526,67 @@ const
   LQuotations = '"%s"';
 begin
   Result := String.Format(LQuotations, [AString]);
+end;
+
+function TParserCodeExporter.SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
+var
+  LBuilder: TStringBuilder;
+
+  procedure NodeToString(const ANode: TParserNode);
+  const
+    LOperator = '%s ';
+    LPar = '(%s)';
+    LAbs = '|%s|';
+    LName = '%s';
+    LArray = '[%s]';
+    LRecord = '{%s}';
+    LArg = '%s';
+    LNamedArg = '%s = %s';
+    LNamedArgDyn = '(%s) = %s';
+    LValue = '%s';
+    LRef = '@%s';
+    LDeRef = '#%s';
+    LDeRefPar = '#%s(%s)';
+    LIf = 'if %s then %s else %s';
+    LTry = 'try %s except %s';
+  var
+    LNode: TParserNode;
+  begin
+    if ANode.Operator <> opAdd then
+    begin
+      LBuilder.AppendFormat(LOperator, [ANode.Operator.ToChar]);
+    end;
+    if ANode is TParserParentNode then
+    begin
+      if ANode is TParserNamedNode then
+      begin
+        LBuilder.AppendFormat(LName, [(ANode as TParserNamedNode).Name]);
+      end else
+      begin
+        LBuilder.Append('(');
+        for LNode in ANode as TParserParentNode do
+        begin
+          NodeToString(LNode);
+        end;
+        LBuilder.Append(')');
+      end;
+    end else
+    begin
+      if ANode is TParserValueNode then
+      begin
+        LBuilder.AppendFormat(LValue, [ValueToString((ANode as TParserValueNode).Value)]);
+      end;
+    end;
+  end;
+
+begin
+  LBuilder := TStringBuilder.Create;
+  try
+    NodeToString(ASyntaxTree.Nodes);
+    Result := LBuilder.ToString;
+  finally
+    LBuilder.Free;
+  end;
 end;
 
 end.
