@@ -51,12 +51,15 @@ type
 
   TParserCodeExporter = class(TParserExporter)
   private const
+    FBuiltInBody = '\built-in\';
     FDeclPatternIntro = '%s %s';
     FDeclPatternValue = ' = %s';
     FDeclPatternType = ': %s';
     FDeclPatternParams = '(%s)';
   private
-    function SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
+    class function ParamToString(const AParam: TParserParam): String;
+    class function SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
+    class function TypeToString(const AType: TParserType): String;
   protected
     class function ReferenceToString(const AReference: IParserValueRefTarget): String; override;
     class function DoubleToString(const ADouble: Double): String; override;
@@ -338,11 +341,9 @@ end;
 procedure TParserCodeExporter.ExportFunction(const AFunction: TParserFunction; const AKind: TParserFunctionKind = fkFunction);
 const
   LKeywords: array [TParserFunctionKind] of String = ('function', 'constructor');
-  LBuiltInBody = '\built-in\';
 var
   LIndex: Integer;
   LParams: TStringList;
-  LParam: TParserParam;
   LBuilder: TStringBuilder;
   LBody: String;
 begin
@@ -352,18 +353,7 @@ begin
     try
       for LIndex := 0 to Pred(AFunction.ParamCount) do
       begin
-        LParam := AFunction.Params[AFunction.ParamNames[LIndex]];
-        LBuilder.Append(LParam.Name);
-        if poType in LParam.Options then
-        begin
-          LBuilder.AppendFormat(FDeclPatternType, [(AFunction.ArgTypes[LIndex] as TParserType).Name]);
-        end;
-        if poDefault in LParam.Options then
-        begin
-          LBuilder.AppendFormat(FDeclPatternValue, [LParam.Default.ToString]);
-        end;
-        LParams.Add(LBuilder.ToString);
-        LBuilder.Clear;
+        LParams.Add(ParamToString(AFunction.Params[AFunction.ParamNames[LIndex]]));
       end;
       LBuilder.AppendFormat(FDeclPatternIntro, [LKeywords[AKind], AFunction.Name]);
       if LParams.Count <> 0 then
@@ -375,7 +365,7 @@ begin
         LBody := SyntaxTreeToString((AFunction as TParserCustomFunction).SyntaxTree);
       end else
       begin
-        LBody := LBuiltInBody;
+        LBody := FBuiltInBody;
       end;
       LBuilder.AppendFormat(FDeclPatternValue, [LBody]);
       Target.Add(LBuilder.ToString);
@@ -489,6 +479,35 @@ begin
   end;
 end;
 
+class function TParserCodeExporter.ParamToString(const AParam: TParserParam): String;
+var
+  LBuilder: TStringBuilder;
+  LType: String;
+begin
+  LBuilder := TStringBuilder.Create;
+  try
+    LBuilder.Append(AParam.Name);
+    if poType in AParam.Options then
+    begin
+      if AParam.&Type is TParserType then
+      begin
+        LType := (AParam.&Type as TParserType).Name;
+      end else
+      begin
+        LType := TypeToString(AParam.&Type as TParserType);
+      end;
+      LBuilder.AppendFormat(FDeclPatternType, [LType]);
+    end;
+    if poDefault in AParam.Options then
+    begin
+      LBuilder.AppendFormat(FDeclPatternValue, [AParam.Default.ToString]);
+    end;
+    Result := LBuilder.ToString;
+  finally
+    LBuilder.Free;
+  end;
+end;
+
 class function TParserCodeExporter.RecordToString(const ARecord: TArray<TPair<String, TParserValue>>): String;
 const
   LField = '%s = %s';
@@ -511,12 +530,38 @@ begin
 end;
 
 class function TParserCodeExporter.ReferenceToString(const AReference: IParserValueRefTarget): String;
+
+  function DelegateFunctionToString(const AFunction: TParserFunction): String;
+  const
+    LPattern = 'func %s ret %s';
+  var
+    LBody: String;
+  begin
+    if AFunction is TParserCustomFunction then
+    begin
+      LBody := SyntaxTreeToString((AFunction as TParserCustomFunction).SyntaxTree);
+    end else
+    begin
+      LBody := FBuiltInBody;
+    end;
+    Result := String.Format(LPattern, [LBody])
+  end;
+
 begin
   if Assigned(AReference) then
   begin
     if AReference is TParserObject then
     begin
-      Result := '@' + AReference.Name;
+      Result := '@' + (AReference as TParserObject).Name;
+    end else
+    begin
+      if AReference is TParserFunctionDelegate then
+      begin
+        Result := DelegateFunctionToString((AReference as TParserFunctionDelegate).&Object);
+      end else
+      begin
+        raise EParserExportUnsupportedError.Create('Value not exportable');
+      end;
     end;
   end;
 end;
@@ -528,7 +573,7 @@ begin
   Result := String.Format(LQuotations, [AString]);
 end;
 
-function TParserCodeExporter.SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
+class function TParserCodeExporter.SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
 var
   LBuilder: TStringBuilder;
 
@@ -587,6 +632,11 @@ begin
   finally
     LBuilder.Free;
   end;
+end;
+
+class function TParserCodeExporter.TypeToString(const AType: TParserType): String;
+begin
+
 end;
 
 end.

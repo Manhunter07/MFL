@@ -14,7 +14,6 @@ type
     FName: String;
     FAttributes: TDictionary<String, TPair<TParserAttribute, TArray<TParserValue>>>;
     FOrderedAttributeNames: TStringList;
-    function GetName: String; // Only to support IParserValueRefTarget
     function GetAttributes(const AName: String): TPair<TParserAttribute, TArray<TParserValue>>;
     function GetAttributeCount: Integer;
   protected
@@ -25,7 +24,7 @@ type
     procedure ProcessAttributes;
   public
     class function ValidName(const AName: String; const AAllowEmpty: Boolean = False): Boolean; // Must NOT be virtual, due to generic aliasing
-    property Name: String read GetName;
+    property Name: String read FName;
     property MinArgCount: Integer read GetMinArgCount;
     property MaxArgCount: Integer read GetMaxArgCount;
     property ArgTypes[const AIndex: Integer]: IParserValueConstraint read GetArgTypes;
@@ -48,7 +47,7 @@ type
     property Addressable: Boolean read GetAddressable;
   end;
 
-  TParserDelegate<T: TParserObject, IParserValueRefTarget> = class(TInterfacedObject, IParserValueRefTarget)
+  TParserObjectDelegate<T: TParserObject, IParserValueRefTarget> = class(TInterfacedObject, IParserValueRefTarget)
   private
     FObject: T;
     function GetDelegation: IParserValueRefTarget;
@@ -183,7 +182,7 @@ type
     destructor Destroy; override;
   end;
 
-  TParserFunctionDelegate = class(TParserDelegate<TParserFunction>)
+  TParserFunctionDelegate = class(TParserObjectDelegate<TParserFunction>)
   public
     constructor Create(const AParams: TArray<TParserParam>; const AOnInvoke: TParserFunctionEvent; const AVarArg: Boolean = False); overload;
     constructor Create(const AParams: TArray<TParserParam>; const AFunction: TFunc<TArray<TParserValue>, TParserValue>; const AVarArg: Boolean = False); overload;
@@ -420,6 +419,13 @@ type
     function GetEnumerator: TEnumerator<TParserFieldType>;
   end;
 
+  TParserTypeDelegate = class(TParserObjectDelegate<TParserType>, IParserValueConstraint)
+  private
+    function GetDelegation: IParserValueConstraint;
+  public
+    property Delegation: IParserValueConstraint read GetDelegation implements IParserValueConstraint;
+  end;
+
   TParserAttribute = class(TParserObject)
   private
 
@@ -466,24 +472,19 @@ begin
   Result := FAttributes[AName];
 end;
 
-function TParserObject.GetName: String;
-begin
-  Result := FName;
-end;
-
 function TParserObject.GetValue(const AArgs: TArray<TParserValue>): TParserValue;
 begin
   if Length(AArgs) < MinArgCount then
   begin
-    raise EParserObjectArgCountError.Create('Not enough parameters');
+    raise EParserObjectArgCountError.Create('Not enough arguments');
   end;
   if (MaxArgCount <> -1) and (Length(AArgs) > MaxArgCount) then
   begin
     if MaxArgCount = 0 then
     begin
-      raise EParserObjectArgCountError.Create('No parameters expected');
+      raise EParserObjectArgCountError.Create('No arguments expected');
     end;
-    raise EParserObjectArgCountError.Create('Too many parameters');
+    raise EParserObjectArgCountError.Create('Too many arguments');
   end;
   Result := TParserValue.Empty[vkDouble];
 end;
@@ -526,21 +527,21 @@ begin
   Result := Supports(Self, IParserWritableObject);
 end;
 
-{ TParserDelegate<T> }
+{ TParserObjectDelegate<T> }
 
-constructor TParserDelegate<T>.Create(const AObject: T);
+constructor TParserObjectDelegate<T>.Create(const AObject: T);
 begin
   inherited Create;
   FObject := AObject;
 end;
 
-destructor TParserDelegate<T>.Destroy;
+destructor TParserObjectDelegate<T>.Destroy;
 begin
   FObject.Free;
   inherited;
 end;
 
-function TParserDelegate<T>.GetDelegation: IParserValueRefTarget;
+function TParserObjectDelegate<T>.GetDelegation: IParserValueRefTarget;
 begin
   Result := FObject;
 end;
@@ -979,7 +980,7 @@ end;
 
 function TParserType.GetNew: TParserValue;
 begin
-  raise EParserTypeNoDefault.CreateFmt('%s has no default value', [Name.QuotedString]);
+  raise EParserTypeNoDefaultError.CreateFmt('%s has no default value', [Name.QuotedString]);
 end;
 
 class function TParserType.GetTypeClasses(const AKeyword: TParserKeyword): TParserTypeClass;
@@ -1012,7 +1013,7 @@ function TParserType.GetValue(const AArgs: TArray<TParserValue>): TParserValue;
 begin
   if not Assigned(&Constructor) then
   begin
-    raise EParserTypeNoConstructor.CreateFmt('%s not evaluable', [Name.QuotedString]);
+    raise EParserTypeNoConstructorError.CreateFmt('%s not evaluable', [Name.QuotedString]);
   end;
   Result := &Constructor.Value[AArgs];
   AssertValue(Result);
@@ -1630,6 +1631,13 @@ begin
     end;
   end;
   Result := True;
+end;
+
+{ TParserTypeDelegate }
+
+function TParserTypeDelegate.GetDelegation: IParserValueConstraint;
+begin
+  Result := &Object;
 end;
 
 end.

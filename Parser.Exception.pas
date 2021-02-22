@@ -30,11 +30,13 @@ type
 
     EParserOptionError = class(EParserError);
 
-    EParserMultiResultError = class(EParserError);
+    EParserResultDeterminationError = class(EParserError);
 
     EParserAddressError = class abstract(EParserError);
 
     EParserUserError = class(EParserError);
+
+    EParserTypeConstructionError = class(EParserError);
 
     EParserLexerError = class abstract(EParserError);
 
@@ -80,9 +82,9 @@ type
 
       EParserFunctionParamDefaultError = class(EParserObjectError);
 
-      EParserTypeNoConstructor = class(EParserObjectError);
+      EParserTypeNoConstructorError = class(EParserObjectError);
 
-      EParserTypeNoDefault = class(EParserObjectError);
+      EParserTypeNoDefaultError = class(EParserObjectError);
 
       EParserTypeCompatibilityError = class(EParserObjectError);
 

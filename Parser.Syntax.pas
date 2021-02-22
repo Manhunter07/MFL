@@ -16,6 +16,8 @@ type
     constructor Create(const ANode: TParserNode); overload;
   end;
 
+  TParserSyntaxTreeKind = (stNone, stParam, stFuncParam, stFuncBody);
+
   TParserKeyword = (kwNone, kw_, kwResolve, kwConstant, kwVariable, kwInline, kwFunction, kwType, kwConstructor, kwOpt, kwRange, kwEnum, kwInt, kwRangeInt, kwAttrib, kwAlias, kwShow, kwDelete, kwAssert, kwLink, kwSpread, kwIf, kwThen, kwElse, kwTry, kwExcept, kwFunc, kwRet);
 
   TParserKeywords = set of TParserKeyword;
@@ -25,29 +27,15 @@ type
     FKeywords: array [Succ(Low(TParserKeyword)) .. High(TParserKeyword)] of String = ('_', 'resolve', 'const', 'var', 'inline', 'function', 'type', 'constructor', 'opt', 'range', 'enum', 'int', 'rangeint', 'attrib', 'alias', 'show', 'delete', 'assert', 'link', 'spread', 'if', 'then', 'else', 'try', 'except', 'func', 'ret');
     class function GetTypeConstructors: TParserKeywords; static;
     class function GetExpressionStarters: TParserKeywords; static;
-    class function GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords; static;
+    class function GetBlockStarters: TParserKeywords; static;
+    class function GetAllowed(const ATreeKind: TParserSyntaxTreeKind; const ANodeKind: TParserNodeKind): TParserKeywords; static;
   public
     constructor Create(const AName: String);
-    class property Allowed[const ANodeKind: TParserNodeKind]: TParserKeywords read GetAllowed;
+    class property Allowed[const ATreeKind: TParserSyntaxTreeKind; const ANodeKind: TParserNodeKind]: TParserKeywords read GetAllowed;
     class property ExpressionStarters: TParserKeywords read GetExpressionStarters;
+    class property BlockStarters: TParserKeywords read GetBlockStarters;
     class property TypeConstructors: TParserKeywords read GetTypeConstructors;
     function ToString: String;
-  end;
-
-  TParserTypeParameter = (tpName, tpType, tpValue);
-
-  TParserTypeConstructor = (tcAny, tcRef, tcRange, tcEnum, tcInteger, tcRangeInt, tcString, tcArray, tcRecord, tcObject);
-
-  TParserTypeConstructorHelper = record helper for TParserTypeConstructor
-  private
-    function GetMaxArgCount: Integer;
-    function GetMinArgCount: Integer;
-    function GetParams(const AIndex: Integer): TParserTypeParameter;
-  public
-    property Params[const AIndex: Integer]: TParserTypeParameter read GetParams;
-    property MinArgCount: Integer read GetMinArgCount;
-    property MaxArgCount: Integer read GetMaxArgCount;
-    constructor Create(AKeyword: TParserKeyword);
   end;
 
   TParserOperator = (opAdd, opSub, opMul, opDiv, opMod, opExp, opRnd, opCmp);
@@ -101,7 +89,7 @@ type
     function GetCount: Integer;
   protected
     function GetValue: TParserValue; override;
-    procedure Add(const ANode: TParserNode);
+    procedure Add(const ANode: TParserNode); virtual;
     function ChildrenValues: TArray<TParserValue>;
   public
     property Nodes[const AIndex: Integer]: TParserNode read GetNodes; default;
@@ -110,6 +98,16 @@ type
     destructor Destroy; override;
     function GetEnumerator: TEnumerator<TParserNode>; inline;
     procedure Clear;
+  end;
+
+  TParserTypeNode = class(TParserParentNode)
+  private
+    FKeyword: TParserKeyword;
+  protected
+    function GetValue: TParserValue; override;
+  public
+    property Keyword: TParserKeyword read FKeyword;
+    constructor Create(const AParent: TParserParentNode; const AKeyword: TParserKeyword);
   end;
 
   TParserAbsNode = class(TParserParentNode)
@@ -209,22 +207,17 @@ type
     function GetValue: TParserValue; override;
   end;
 
-  TParserFuncNode = class(TParserParentNode)
-  protected
-    function GetValue: TParserValue; override;
-  end;
-
   TParserTree = class
   private
     FValueSuppliers: TArray<IParserValueSupplier>;
-    FNodes: TParserRootNode;
+    FNodes: TParserParentNode;
     function GetValues(const AName: String; const AArgs: TArray<TParserValue>): TParserValue;
     function GetRefTargets(const AName: String): IParserValueRefTarget;
   protected
     property Values[const AName: String; const AArgs: TArray<TParserValue>]: TParserValue read GetValues;
     property RefTargets[const AName: String]: IParserValueRefTarget read GetRefTargets;
   public
-    property Nodes: TParserRootNode read FNodes;
+    property Nodes: TParserParentNode read FNodes;
     constructor Create(const AValueSuppliers: TArray<IParserValueSupplier> = []);
     destructor Destroy; override;
     function GetEnumerator: TEnumerator<TParserNode>; inline;
@@ -314,14 +307,22 @@ begin
   Self := TParserKeyword(Succ(IndexText(AName, FKeywords)));
 end;
 
-class function TParserKeywordHelper.GetAllowed(const ANodeKind: TParserNodeKind): TParserKeywords;
+class function TParserKeywordHelper.GetAllowed(const ATreeKind: TParserSyntaxTreeKind; const ANodeKind: TParserNodeKind): TParserKeywords;
 const
-  LAllowedKeywords: array [TParserNodeKind] of TParserKeywords = (
-    [kwIf, kwTry], [], [kwSpread], [], [], [], [kwThen], [kwElse], [], [kwExcept], []
+  LAllowedTreeKeywords: array [TParserSyntaxTreeKind] of TParserKeywords = (
+    [], [], [kwRet], []
+  );
+  LAllowedNodeKeywords: array [TParserNodeKind] of TParserKeywords = (
+    [], [], [kwSpread], [], [], [], [kwThen], [kwElse], [], [kwExcept], []
   );
 begin
-  Result := LAllowedKeywords[ANodeKind];
+  Result := LAllowedTreeKeywords[ATreeKind] + LAllowedNodeKeywords[ANodeKind];
   Include(Result, kwNone);
+end;
+
+class function TParserKeywordHelper.GetBlockStarters: TParserKeywords;
+begin
+  Result := [kwIf, kwTry, kwFunc];
 end;
 
 class function TParserKeywordHelper.GetExpressionStarters: TParserKeywords;
@@ -337,98 +338,6 @@ end;
 function TParserKeywordHelper.ToString: String;
 begin
   Result := FKeywords[Self];
-end;
-
-{ TParserTypeConstructorHelper }
-
-constructor TParserTypeConstructorHelper.Create(AKeyword: TParserKeyword);
-begin
-  case AKeyword of
-//    kwAny:
-//      begin
-//        Self := tcAny;
-//      end;
-    kwRange:
-      begin
-        Self := tcRange;
-      end;
-    kwEnum:
-      begin
-        Self := tcRange;
-      end;
-    kwInt:
-      begin
-        Self := tcRange;
-      end;
-    kwRangeInt:
-      begin
-        Self := tcRange;
-      end;
-  end;
-end;
-
-function TParserTypeConstructorHelper.GetMaxArgCount: Integer;
-const
-  LMaxArgCounts: array [TParserTypeConstructor] of Integer = (
-    -1, 2, 2, -1, -1, -1, 1, -1, -1, -1
-  );
-begin
-  Result := LMaxArgCounts[Self];
-end;
-
-function TParserTypeConstructorHelper.GetMinArgCount: Integer;
-const
-  LMinArgCounts: array [TParserTypeConstructor] of Integer = (
-    0, 0, 2, 1, 0, 2, 0, 0, 0, 1
-  );
-begin
-  Result := LMinArgCounts[Self];
-end;
-
-function TParserTypeConstructorHelper.GetParams(const AIndex: Integer): TParserTypeParameter;
-begin
-  case Self of
-    tcAny:
-      begin
-        Result := tpName;
-      end;
-    tcRef:
-      begin
-        Result := tpType;
-      end;
-    tcRange:
-      begin
-        Result := tpValue;
-      end;
-    tcEnum:
-      begin
-        Result := tpValue;
-      end;
-    tcInteger:
-      begin
-        Result := tpValue;
-      end;
-    tcRangeInt:
-      begin
-        Result := tpValue;
-      end;
-    tcString:
-      begin
-        Result := tpValue;
-      end;
-    tcArray:
-      begin
-        Result := tpValue;
-      end;
-    tcRecord:
-      begin
-        Result := tpName;
-      end;
-    tcObject:
-      begin
-        Result := tpType;
-      end;
-  end;
 end;
 
 { TParserOperatorHelper }
@@ -547,11 +456,11 @@ begin
       end;
     opMul:
       begin
-        Result := TParserValue.Create(AFirst.AsDouble * ASecond.AsDouble);
+        Result := TParserValue.Multiply(AFirst, ASecond);
       end;
     opDiv:
       begin
-        Result := TParserValue.Create(AFirst.AsDouble / ASecond.AsDouble);
+        Result := TParserValue.Divide(AFirst, ASecond);
       end;
     opMod:
       begin
@@ -762,6 +671,60 @@ begin
   Result := SyntaxTree.Values[Name, ChildrenValues];
 end;
 
+{ TParserTypeNode }
+
+constructor TParserTypeNode.Create(const AParent: TParserParentNode; const AKeyword: TParserKeyword);
+begin
+  inherited Create(AParent, opAdd);
+  FKeyword := AKeyword;
+end;
+
+function TParserTypeNode.GetValue: TParserValue;
+var
+  LArgs: TArray<TParserValue>;
+
+  procedure AssertArgCount(const AMin, AMax: Integer);
+  begin
+    if Length(LArgs) < AMin then
+    begin
+      raise EParserTypeConstructionError.Create('Not enough arguments');
+    end;
+    if (AMax <> -1) and (Length(LArgs) > AMax) then
+    begin
+      if AMax = 0 then
+      begin
+        raise EParserTypeConstructionError.Create('No arguments expected');
+      end;
+      raise EParserTypeConstructionError.Create('Too many arguments');
+    end;
+  end;
+
+begin
+  LArgs := ChildrenValues;
+  case Keyword of
+    kwRange:
+      begin
+        AssertArgCount(2, 2);
+        Result := TParserValue.Create(TParserTypeDelegate.Create(TParserRangeType.Create(String.Empty, LArgs[0], LArgs[1])));
+      end;
+    kwEnum:
+      begin
+        AssertArgCount(1, -1);
+        Result := TParserValue.Create(TParserTypeDelegate.Create(TParserEnumType.Create(String.Empty, LArgs)));
+      end;
+    kwInt:
+      begin
+        AssertArgCount(0, -1);
+        Result := TParserValue.Create(TParserTypeDelegate.Create(TParserIntegerType.Create(String.Empty, LArgs)));
+      end;
+    kwRangeInt:
+      begin
+        AssertArgCount(2, -1);
+        Result := TParserValue.Create(TParserTypeDelegate.Create(TParserRangeIntegerType.Create(String.Empty, LArgs[0], LArgs[1], Copy(LArgs, 2, Length(LArgs) - 2))));
+      end;
+  end;
+end;
+
 { TParserArrayNode }
 
 function TParserArrayNode.GetValue: TParserValue;
@@ -892,13 +855,6 @@ begin
   except
     Result := Nodes[1].Value;
   end;
-end;
-
-{ TParserFuncNode }
-
-function TParserFuncNode.GetValue: TParserValue;
-begin
-  Result := TParserValue.Create(TParserFunctionDelegate.Create([], nil));
 end;
 
 { TParserTree }

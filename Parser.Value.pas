@@ -127,12 +127,10 @@ type
 
   IParserValueRefTarget = interface
     ['{0DF1D164-7078-4D25-B195-928D5496A0A3}']
-    function GetName: String;
     function GetValue(const AArgs: TArray<TParserValue>): TParserValue;
     function GetMinArgCount: Integer;
     function GetMaxArgCount: Integer;
     function GetArgTypes(const AIndex: Integer): IParserValueConstraint;
-    property Name: String read GetName;
     property MinArgCount: Integer read GetMinArgCount;
     property MaxArgCount: Integer read GetMaxArgCount;
     property ArgTypes[const AIndex: Integer]: IParserValueConstraint read GetArgTypes;
@@ -885,7 +883,12 @@ end;
 
 class function TParserValue.Multiply(const AFirst, ASecond: TParserValue): TParserValue;
 begin
-
+  case AFirst.Kind of
+    vkDouble:
+      begin
+        Result := TParserValue.Create(AFirst.AsDouble * ASecond.AsDouble);
+      end;
+  end;
 end;
 
 function TParserValue.Negate: TParserValue;
@@ -1065,7 +1068,27 @@ end;
 
 class function TParserValue.Divide(const AFirst, ASecond: TParserValue): TParserValue;
 begin
-
+  case AFirst.Kind of
+    vkDouble:
+      begin
+        if ASecond.IsEmpty and not (AFirst.IsEmpty or AFirst.IsNaN or AFirst.IsPosInf or AFirst.IsNegInf) then
+        begin
+          case TParserValue.Compare(AFirst, ASecond) of
+            LessThanValue:
+              begin
+                Result := TParserValue.Inf.Negate;
+              end;
+            GreaterThanValue:
+              begin
+                Result := TParserValue.Inf;
+              end;
+          end;
+        end else
+        begin
+          Result := TParserValue.Create(AFirst.AsDouble / ASecond.AsDouble);
+        end;
+      end;
+  end;
 end;
 
 { TParserValueHelper }

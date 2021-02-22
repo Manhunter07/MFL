@@ -774,7 +774,7 @@ begin
         begin
           if LResult <> -1 then
           begin
-            raise EParserMultiResultError.Create('Return value not determinable');
+            raise EParserResultDeterminationError.Create('Return value not determinable');
           end;
           LResult := Pred(LIndex);
         end;
@@ -955,6 +955,26 @@ begin
     begin
       Result := TParserValue.Create(not Params[0].IsEmpty);
     end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Case', [TParserParam.Create('Value'), TParserParam.Create('Case'), TParserParam.Create('ThenValue'), TParserParam.Create('NextCaseOrElse')],
+    function (Params: TArray<TParserValue>): TParserValue
+    var
+      LIndex: Integer;
+    begin
+      LIndex := 1;
+      while LIndex < High(Params) do
+      begin
+        if Params[0].Equals(Params[LIndex]) then
+        begin
+          Exit(Params[Succ(LIndex)]);
+        end;
+        Inc(LIndex, 2);
+      end;
+      if LIndex > High(Params) then
+      begin
+        raise EParserResultDeterminationError.Create('Return value not determinable');
+      end;
+      Result := Params[LIndex];
+    end, True));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('IfDecl', [TParserParam.Create('Identifier', LTypes.&String), TParserParam.Create('ThenValue'), TParserParam.Create('ElseValue')],
     function (Params: TArray<TParserValue>): TParserValue
     begin
@@ -1005,7 +1025,7 @@ begin
             end;
           EqualsValue:
             begin
-              raise EParserMultiResultError.Create('Return value not determinable');
+              raise EParserResultDeterminationError.Create('Return value not determinable');
             end;
         end;
       end;
@@ -1021,7 +1041,7 @@ begin
         case CompareValue(Abs(Params[LIndex].AsDouble - Params[0].AsDouble), Abs(Result.AsDouble - Params[0].AsDouble)) of
           EqualsValue:
             begin
-              raise EParserMultiResultError.Create('Return value not determinable');
+              raise EParserResultDeterminationError.Create('Return value not determinable');
             end;
           GreaterThanValue:
             begin

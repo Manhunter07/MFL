@@ -496,19 +496,19 @@ var
     LValue: TParserValue;
     LFunct: TParserCustomFunction;
     LFunctParams: TList<TParserParam>;
-    LFunctParamNames: TStringList;
-    LFunctParamName: String;
     LTypeClass: TParserTypeClass;
-    LType: IParserValueConstraint;
     LExportTarget: TStringList;
     LExporter: TParserCodeExporter;
     LNameData: TParserNameData;
 
-    procedure BuildTree(const AFunctParamDef: Boolean = False);
+    procedure ParseType(const AAllowedFollowTokens: TParserTokenKinds; AName: String = String.Empty); forward;
+    procedure BuildFunctParams(var AFunctParams: TList<TParserParam>; const ADelegate: Boolean = False); forward;
+
+    procedure BuildTree(var ATree: TParserTree; const ASyntaxTreeKind: TParserSyntaxTreeKind = stNone);
     var
       LNode: TParserParentNode;
 
-      procedure BuildParentNode(const AKind: TParserNodeKind = nkNone);
+      procedure BuildParentNode(const ANodeKind: TParserNodeKind = nkNone);
       var
         LDeRef: Boolean;
 
@@ -516,6 +516,10 @@ var
         var
           LOperator: TParserOperator;
           LNewNode: TParserParentNode;
+          LSubTree: TParserTree;
+          LDelegateFunct: TParserCustomFunction;
+          LDelegateFunctParams: TList<TParserParam>;
+          LDelegateSyntaxTree: TParserTree;
         begin
           if LToken.Kind = tkSymbolOp then
           begin
@@ -524,7 +528,7 @@ var
               raise EParserOperatorError.CreateFmt('Wrong operand count for %s', [String(LToken.&Operator.ToChar).QuotedString]);
             end;
             LOperator := LToken.&Operator;
-            ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+            ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
           end else
           begin
             LOperator := opAdd;
@@ -534,7 +538,7 @@ var
               begin
                 ExpectToken([tkName]);
                 TParserRefNode.Create(LNode, LToken.Name);
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[AKind]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkSymbolHash:
               begin
@@ -545,13 +549,13 @@ var
             tkSymbolParOp:
               begin
                 LNode := TParserParentNode.Create(LNode, LOperator);
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkNone]);
                 BuildParentNode;
               end;
             tkSymbolBrackOp:
               begin
                 LNode := TParserArrayNode.Create(LNode, LOperator);
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBrackCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBrackCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkElements]);
                 BuildParentNode(nkElements);
               end;
             tkSymbolBraceOp:
@@ -563,23 +567,23 @@ var
             tkSymbolAbs:
               begin
                 LNode := TParserAbsNode.Create(LNode, LOperator);
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkAbs]);
                 BuildParentNode(nkAbs);
               end;
             tkNumberDec:
               begin
                 TParserValueNode.Create(LNode, LOperator, TParserValue.Create(LToken.NumberDec));
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[AKind]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkNumberHex:
               begin
                 TParserValueNode.Create(LNode, LOperator, TParserValue.Create(LToken.NumberHex));
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[AKind]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkText:
               begin
                 TParserValueNode.Create(LNode, LOperator, TParserValue.Create(LToken.Text));
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[AKind]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkName:
               begin
@@ -591,12 +595,12 @@ var
                         raise EParserTokenUnexpectedError.CreateFmt('Unexpected token at %d: %s', [LToken.CharIndex, LToken.ToString.QuotedString]);
                       end;
                       (LNode as TParserArgNode).Spread := True;
-                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
                     end;
                   kwIf:
                     begin
                       LNode := TParserIfNode.Create(LNode, LOperator);
-                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
                       BuildParentNode(nkIf);
                       BuildParentNode(nkThen);
                       BuildParentNode(nkElse);
@@ -604,10 +608,39 @@ var
                   kwTry:
                     begin
                       LNode := TParserTryNode.Create(LNode, LOperator);
-                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
                       BuildParentNode(nkTry);
                       BuildParentNode(nkExcept);
                     end;
+                  kwFunc:
+                    begin
+                      LDelegateFunctParams := TList<TParserParam>.Create;
+                      try
+                        BuildFunctParams(LDelegateFunctParams, True);
+                        ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
+                        LDelegateFunct := TParserCustomFunction.Create(LObjectName, LDelegateFunctParams.ToArray);
+                        try
+                          LDelegateSyntaxTree := TParserTree.Create([LDelegateFunct, Self]);
+                          try
+                            BuildTree(LDelegateSyntaxTree, stFuncBody);
+                          except
+                            LDelegateSyntaxTree.Free;
+                            raise;
+                          end;
+                          if Options.Optimization then
+                          begin
+                            LSyntaxTree.Optimize;
+                          end;
+                          LDelegateFunct.SyntaxTree := LDelegateSyntaxTree;
+                          TParserValueNode.Create(LNode, LOperator, TParserValue.Create(TParserFunctionDelegate.Create(LDelegateFunct)));
+                        except
+                          LDelegateFunct.Free;
+                          raise;
+                        end;
+                      finally
+                        LDelegateFunctParams.Free;
+                      end;
+                    end
                   else
                     begin
                       if LDeRef then
@@ -618,11 +651,11 @@ var
                       begin
                         LNewNode := TParserNamedNode.Create(LNode, LOperator, LToken.Name);
                       end;
-                      ExpectToken([tkEnd, tkSymbolOp, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackCl,  tkSymbolBraceCl, tkSymbolAbs, tkSymbolComma], TParserKeyword.Allowed[AKind]);
+                      ExpectToken([tkEnd, tkSymbolOp, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackCl,  tkSymbolBraceCl, tkSymbolAbs, tkSymbolComma], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
                       if LToken.Kind = tkSymbolParOp then
                       begin
                         LNode := LNewNode;
-                        ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkArgs]);
+                        ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkArgs]);
                         BuildParentNode(nkArgs);
                       end;
                     end;
@@ -633,7 +666,7 @@ var
 
       begin
         LDeRef := False;
-        case AKind of
+        case ANodeKind of
           nkArgs, nkElements, nkIf, nkThen, nkElse, nkTry, nkExcept:
             begin
               LNode := TParserArgNode.Create(LNode);
@@ -644,16 +677,16 @@ var
                 tkSymbolParOp:
                   begin
                     LNode := TParserDynamicNamedArgNode.Create(LNode);
-                    ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                    ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkFieldName]);
                     BuildParentNode(nkFieldName);
-                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkFields]);
                     LNode := TParserArgNode.Create(LNode);
                   end;
                 tkName:
                   begin
                     LNode := TParserStaticNamedArgNode.Create(LNode, LToken.Name);
                     ExpectToken([tkSymbolEq]);
-                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                    ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkFields]);
                   end;
                 else
                   begin
@@ -670,15 +703,19 @@ var
           case LToken.Kind of
             tkSymbolParCl:
               begin
-                if not Assigned(LNode.Parent) or not (AKind in [nkNone, nkArgs, nkFieldName]) or ((AKind = nkArgs) and not Assigned(LNode.Parent.Parent)) then
+                if not Assigned(LNode.Parent) or not (ANodeKind in [nkNone, nkArgs, nkFieldName]) or ((ANodeKind = nkArgs) and not Assigned(LNode.Parent.Parent)) then
                 begin
-                  if not AFunctParamDef then
+                  if ASyntaxTreeKind = stFuncBody then
+                  begin
+                    Exit;
+                  end;
+                  if (ASyntaxTreeKind <> stParam) and not (ANodeKind in [nkElse, nkExcept]) then
                   begin
                     raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
                   end;
                   Break;
                 end;
-                if AKind = nkArgs then
+                if ANodeKind = nkArgs then
                 begin
                   if LNode.Count = 0 then
                   begin
@@ -690,16 +727,20 @@ var
                   end;
                 end;
                 LNode := LNode.Parent;
-                ExpectToken(TParserTokenKind.AllowedAfter[AKind], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
+                ExpectToken(TParserTokenKind.AllowedAfter[ANodeKind], TParserKeyword.Allowed[ASyntaxTreeKind, TParserNodeKind.Create(LNode)]);
                 Exit;
               end;
             tkSymbolBrackCl:
               begin
-                if not Assigned(LNode.Parent) or (AKind <> nkElements) or ((AKind = nkElements) and not Assigned(LNode.Parent.Parent)) then
+                if (not Assigned(LNode.Parent) or (ANodeKind <> nkElements) or ((ANodeKind = nkElements) and not Assigned(LNode.Parent.Parent))) and not (ANodeKind in [nkElse, nkExcept]) then
                 begin
+                  if ASyntaxTreeKind = stFuncBody then
+                  begin
+                    Exit;
+                  end;
                   raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
                 end;
-                if AKind = nkElements then
+                if ANodeKind = nkElements then
                 begin
                   if LNode.Count = 0 then
                   begin
@@ -711,16 +752,20 @@ var
                   end;
                 end;
                 LNode := LNode.Parent;
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, TParserNodeKind.Create(LNode)]);
                 Exit;
               end;
             tkSymbolBraceCl:
               begin
-                if not Assigned(LNode.Parent) or (AKind <> nkFields) or ((AKind = nkFields) and not Assigned(LNode.Parent.Parent)) then
+                if (not Assigned(LNode.Parent) or (ANodeKind <> nkFields) or ((ANodeKind = nkFields) and not Assigned(LNode.Parent.Parent))) and not (ANodeKind in [nkElse, nkExcept]) then
                 begin
+                  if ASyntaxTreeKind = stFuncBody then
+                  begin
+                    Exit;
+                  end;
                   raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
                 end;
-                if AKind = nkFields then
+                if ANodeKind = nkFields then
                 begin
                   if LNode.Count = 0 then
                   begin
@@ -736,12 +781,12 @@ var
                   LNode := LNode.Parent;
                 end;
                 LNode := LNode.Parent;
-                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
+                ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, TParserNodeKind.Create(LNode)]);
                 Exit;
               end;
             tkSymbolAbs:
               begin
-                if AKind = nkAbs then
+                if ANodeKind = nkAbs then
                 begin
                   if not Assigned(LNode.Parent) then
                   begin
@@ -752,10 +797,14 @@ var
                     raise EParserTokenUnexpectedError.CreateFmt('Unexpected token at %d: %s', [LToken.CharIndex, LToken.ToString.QuotedString]);
                   end;
                   LNode := LNode.Parent;
-                  ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolAbs], TParserKeyword.Allowed[TParserNodeKind.Create(LNode)]);
+                  ExpectToken([tkEnd, tkSymbolOp, tkSymbolComma, tkSymbolParCl, tkSymbolBrackCl, tkSymbolAbs], TParserKeyword.Allowed[ASyntaxTreeKind, TParserNodeKind.Create(LNode)]);
                   Exit;
                 end else
                 begin
+                  if ASyntaxTreeKind = stFuncBody then
+                  begin
+                    Exit;
+                  end;
                   if LNode.Count <> 0 then
                   begin
                     raise EParserParenthesisError.CreateFmt('Unexpected parenthesis at %d', [LToken.CharIndex]);
@@ -765,7 +814,7 @@ var
               end;
             tkSymbolComma:
               begin
-                case AKind of
+                case ANodeKind of
                   nkArgs, nkElements:
                     begin
                       LNode := TParserArgNode.Create(LNode.Parent);
@@ -781,7 +830,7 @@ var
                         tkSymbolParOp:
                           begin
                             LNode := TParserDynamicNamedArgNode.Create(LNode.Parent);
-                            ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
+                            ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, nkFieldName]);
                             BuildParentNode(nkFieldName);
                             LNode := TParserArgNode.Create(LNode);
                           end;
@@ -794,25 +843,41 @@ var
                     end;
                   else
                     begin
-                      if not AFunctParamDef then
-                      begin
-                        raise EParserCommaError.CreateFmt('Unexpected separator at %d', [LToken.CharIndex]);
+                      case ASyntaxTreeKind of
+                        stNone:
+                          begin
+                            raise EParserCommaError.CreateFmt('Unexpected separator at %d', [LToken.CharIndex]);
+                          end;
+                        stFuncBody:
+                          begin
+                            Exit;
+                          end;
+                        else
+                          begin
+                            Break;
+                          end;
                       end;
-                      Break;
                     end;
                 end;
-                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[AKind]);
+                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkName:
               begin
-                if LToken.Keyword in [kwThen, kwElse, kwExcept] then
-                begin
-                  LNode := LNode.Parent;
-                  ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName]);
-                  Exit;
-                end else
-                begin
-                  BuildSubNode;
+                case LToken.Keyword of
+                  kwThen, kwElse, kwExcept:
+                    begin
+                      LNode := LNode.Parent;
+                      ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters);
+                      Exit;
+                    end;
+                  kwRet:
+                    begin
+                      Exit;
+                    end
+                  else
+                    begin
+                      BuildSubNode;
+                    end;
                 end;
               end;
             else
@@ -820,8 +885,8 @@ var
                 BuildSubNode;
               end;
           end;
-        until (LToken.Kind = tkEnd);
-        if AKind in [nkElse, nkExcept] then
+        until LToken.Kind = tkEnd;
+        if ANodeKind in [nkElse, nkExcept] then
         begin
           LNode := LNode.Parent.Parent;
           Exit;
@@ -833,7 +898,7 @@ var
       end;
 
     begin
-      LNode := LSyntaxTree.Nodes;
+      LNode := ATree.Nodes;
       BuildParentNode;
     end;
 
@@ -853,21 +918,109 @@ var
       until LToken.Kind <> tkSymbolComma;
     end;
 
+    procedure BuildFunctParams(var AFunctParams: TList<TParserParam>; const ADelegate: Boolean = False);
+    const
+      LTreeKinds: array [Boolean] of TParserSyntaxTreeKind = (
+        stParam, stFuncParam
+      );
+      LEndingTokens: array [Boolean] of TParserTokenKind = (
+        tkSymbolParCl, tkName
+      );
+    var
+      LDefValSyntaxTree: TParserTree;
+      LEndingToken: TParserTokenKind;
+      LNames: TStringList;
+      LName: String;
+      LType: IParserValueConstraint;
+    begin
+      if not ADelegate then
+      begin
+        ExpectToken([tkSymbolEq, tkSymbolParOp]);
+      end;
+      if ADelegate or (LToken.Kind = tkSymbolParOp) then
+      begin
+        LNames := TStringList.Create;
+        try
+          repeat
+            ExpectToken([LEndingTokens[ADelegate], tkName], TParserKeyword.Allowed[LTreeKinds[ADelegate], nkNone]);
+            if (LToken.Kind = tkName) and (LToken.Keyword <> kwRet) then
+            begin
+              repeat
+                LNames.Add(LToken.Name);
+                ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolColon, tkSymbolAmp, LEndingTokens[ADelegate]], TParserKeyword.Allowed[LTreeKinds[ADelegate], nkNone]);
+                if LToken.Kind = tkSymbolAmp then
+                begin
+                  ExpectToken([tkName]);
+                end;
+              until (LToken.Kind <> tkName) or (LToken.Keyword = kwRet);
+              if LToken.Kind = tkSymbolColon then
+              begin
+                ExpectToken([tkName], TParserKeyword.TypeConstructors + [kwNone]);
+                LTypeClass := TParserType.TypeClasses[LToken.Keyword];
+                if Assigned(LTypeClass) then
+                begin
+                  ParseType([tkSymbolComma, tkSymbolEq, LEndingTokens[ADelegate]]);
+//                      LType := TParserTempType.Create(LType as TParserType);
+                end else
+                begin
+                  if not (Objects[LToken.Name] is TParserType) then
+                  begin
+                    raise EParserNoTypeError.CreateFmt('%s is not a type', [LObjectName]);
+                  end;
+                  LType := Objects[LToken.Name] as TParserType;
+                  ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
+                end;
+              end;
+              if LToken.Kind = tkSymbolEq then
+              begin
+                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[LTreeKinds[ADelegate], nkNone]);
+                LDefValSyntaxTree := TParserTree.Create([Self]);
+                try
+                  BuildTree(LDefValSyntaxTree, LTreeKinds[ADelegate]);
+                  LValue := LDefValSyntaxTree.Calculate;
+                finally
+                  LDefValSyntaxTree.Free;
+                end;
+                for LName in LNames do
+                begin
+                  AFunctParams.Add(TParserParam.Create(LName, LValue, LType));
+                end;
+              end else
+              begin
+                for LName in LNames do
+                begin
+                  AFunctParams.Add(TParserParam.Create(LName, LType));
+                end;
+              end;
+              LNames.Clear;
+              LType := Default(IParserValueConstraint);
+            end;
+          until (LToken.Kind = LEndingTokens[ADelegate]) and (not ADelegate or (LToken.Keyword = kwRet));
+        finally
+          LNames.Free;
+        end;
+        if not ADelegate then
+        begin
+          ExpectToken([tkSymbolEq]);
+        end;
+      end;
+    end;
+
     procedure ParseType(const AAllowedFollowTokens: TParserTokenKinds; AName: String = String.Empty);
     begin
-      ExpectToken(AAllowedFollowTokens + [tkSymbolParOp]);
-      if LToken.Kind = tkSymbolParOp then
-      begin
-        repeat
-          ExpectToken([tkSymbolParCl, tkName]);
-          if LToken.Kind = tkName then
-          begin
-            ExpectToken([tkSymbolComma, tkSymbolParCl]);
-          end;
-        until LToken.Kind = tkSymbolParCl;
-        ExpectToken(AAllowedFollowTokens);
-      end;
-      LType := LTypeClass.Create(AName);
+//      ExpectToken(AAllowedFollowTokens + [tkSymbolParOp]);
+//      if LToken.Kind = tkSymbolParOp then
+//      begin
+//        repeat
+//          ExpectToken([tkSymbolParCl, tkName]);
+//          if LToken.Kind = tkName then
+//          begin
+//            ExpectToken([tkSymbolComma, tkSymbolParCl]);
+//          end;
+//        until LToken.Kind = tkSymbolParCl;
+//        ExpectToken(AAllowedFollowTokens);
+//      end;
+//      LType := LTypeClass.Create(AName);
     end;
 
   begin
@@ -884,7 +1037,7 @@ var
         begin
           LSyntaxTree := TParserTree.Create([Self]);
           try
-            BuildTree;
+            BuildTree(LSyntaxTree);
             Result.FReturnValue := TParserResponseValue.Create(LSyntaxTree.Calculate);
           finally
             LSyntaxTree.Free;
@@ -902,10 +1055,10 @@ var
           LObjectNames := TStringList.Create;
           try
             ParseObjectNames([tkSymbolEq]);
-            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
             LSyntaxTree := TParserTree.Create([Self]);
             try
-              BuildTree;
+              BuildTree(LSyntaxTree);
               LValue := LSyntaxTree.Calculate;
               for LObjectName in LObjectNames do
               begin
@@ -925,10 +1078,10 @@ var
             ParseObjectNames([tkEnd, tkSymbolEq]);
             if LToken.Kind = tkSymbolEq then
             begin
-              ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+              ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
               LSyntaxTree := TParserTree.Create([Self]);
               try
-                BuildTree;
+                BuildTree(LSyntaxTree);
                 LValue := LSyntaxTree.Calculate;
               finally
                 LSyntaxTree.Free;
@@ -949,79 +1102,15 @@ var
         begin
           ExpectToken([tkName]);
           LObjectName := LToken.Name;
-          ExpectToken([tkSymbolEq, tkSymbolParOp]);
           LFunctParams := TList<TParserParam>.Create;
           try
-            if LToken.Kind = tkSymbolParOp then
-            begin
-              LFunctParamNames := TStringList.Create;
-              try
-                repeat
-                  ExpectToken([tkSymbolParCl, tkName]);
-                  if LToken.Kind = tkName then
-                  begin
-                    repeat
-                      LFunctParamNames.Add(LToken.Name);
-                      ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolColon, tkSymbolAmp, tkSymbolParCl]);
-                      if LToken.Kind = tkSymbolAmp then
-                      begin
-                        ExpectToken([tkName]);
-                      end;
-                    until LToken.Kind <> tkName;
-                    if LToken.Kind = tkSymbolColon then
-                    begin
-                      ExpectToken([tkName], TParserKeyword.TypeConstructors + [kwNone]);
-                      LTypeClass := TParserType.TypeClasses[LToken.Keyword];
-                      if Assigned(LTypeClass) then
-                      begin
-                        ParseType([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
-  //                      LType := TParserTempType.Create(LType as TParserType);
-                      end else
-                      begin
-                        if not (Objects[LToken.Name] is TParserType) then
-                        begin
-                          raise EParserNoTypeError.CreateFmt('%s is not a type', [LObjectName]);
-                        end;
-                        LType := Objects[LToken.Name] as TParserType;
-                        ExpectToken([tkSymbolComma, tkSymbolEq, tkSymbolParCl]);
-                      end;
-                    end;
-                    if LToken.Kind = tkSymbolEq then
-                    begin
-                      ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
-                      LSyntaxTree := TParserTree.Create([Self]);
-                      try
-                        BuildTree(True);
-                        LValue := LSyntaxTree.Calculate;
-                      finally
-                        LSyntaxTree.Free;
-                      end;
-                      for LFunctParamName in LFunctParamNames do
-                      begin
-                        LFunctParams.Add(TParserParam.Create(LFunctParamName, LValue, LType));
-                      end;
-                    end else
-                    begin
-                      for LFunctParamName in LFunctParamNames do
-                      begin
-                        LFunctParams.Add(TParserParam.Create(LFunctParamName, LType));
-                      end;
-                    end;
-                    LFunctParamNames.Clear;
-                    LType := Default(IParserValueConstraint);
-                  end;
-                until LToken.Kind = tkSymbolParCl;
-              finally
-                LFunctParamNames.Free;
-              end;
-              ExpectToken([tkSymbolEq]);
-            end;
-            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+            BuildFunctParams(LFunctParams);
+            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
             LFunct := TParserCustomFunction.Create(LObjectName, LFunctParams.ToArray);
             try
               LSyntaxTree := TParserTree.Create([LFunct, Self]);
               try
-                BuildTree;
+                BuildTree(LSyntaxTree);
               except
                 LSyntaxTree.Free;
                 raise;
@@ -1065,7 +1154,7 @@ var
             raise EParserTypeUnknownError.CreateFmt('Unknown type constructor: %s', [String(LToken.Name).QuotedString]);
           end;
           ParseType([tkEnd], LObjectName);
-          Dictionary.Add(LType as TParserType);
+//          Dictionary.Add(LType as TParserType);
         end;
       exDeclInline:
         begin
@@ -1100,10 +1189,10 @@ var
           LObjectNames := TStringList.Create;
           try
             ParseObjectNames([tkSymbolEq]);
-            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
             LSyntaxTree := TParserTree.Create([Self]);
             try
-              BuildTree;
+              BuildTree(LSyntaxTree);
               LValue := LSyntaxTree.Calculate;
             finally
               LSyntaxTree.Free;
@@ -1154,10 +1243,10 @@ var
           LObjectNames := TStringList.Create;
           try
             ParseObjectNames([tkSymbolEq]);
-            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[nkNone]);
+            ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
             LSyntaxTree := TParserTree.Create([Self]);
             try
-              BuildTree;
+              BuildTree(LSyntaxTree);
               LValue := LSyntaxTree.Calculate;
               for LObjectName in LObjectNames do
               begin
@@ -1193,7 +1282,7 @@ begin
   LWarnings := TStringList.Create;
   LLexer := TParserLexer.Create(AExpression);
   try
-    ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.ExpressionStarters + TParserKeyword.Allowed[nkNone]);
+    ExpectToken([tkEnd, tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.ExpressionStarters + TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
     Result.FExpressionKind := TParserExpressionKind.Create(LToken);
     EvaluateExpression;
     if Options.Warnings then
