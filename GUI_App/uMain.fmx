@@ -1,0 +1,355 @@
+object fmMain: TfmMain
+  Left = 0
+  Top = 0
+  Caption = 'MFL Coder'
+  ClientHeight = 451
+  ClientWidth = 640
+  FormFactor.Width = 320
+  FormFactor.Height = 480
+  FormFactor.Devices = [Desktop]
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  DesignerMasterStyle = 0
+  object ScaledLayout: TScaledLayout
+    Align = Client
+    OriginalWidth = 640.000000000000000000
+    OriginalHeight = 451.000000000000000000
+    Size.Width = 640.000000000000000000
+    Size.Height = 451.000000000000000000
+    Size.PlatformDefault = False
+    Visible = False
+    OnResized = ScaledLayoutResized
+  end
+  object Layout: TLayout
+    Align = Client
+    Size.Width = 640.000000000000000000
+    Size.Height = 451.000000000000000000
+    Size.PlatformDefault = False
+    object GridPanelLayoutCommand: TGridPanelLayout
+      Align = Top
+      Size.Width = 640.000000000000000000
+      Size.Height = 50.000000000000000000
+      Size.PlatformDefault = False
+      ColumnCollection = <
+        item
+          Value = 85.000000000000000000
+        end
+        item
+          Value = 15.000000000000000000
+        end>
+      ControlCollection = <
+        item
+          Column = 1
+          Control = btRun
+          Row = 0
+        end
+        item
+          Column = 0
+          Control = edCommand
+          Row = 0
+        end>
+      RowCollection = <
+        item
+          Value = 100.000000000000000000
+        end
+        item
+          SizeStyle = Auto
+        end>
+      object btRun: TButton
+        Align = Client
+        Default = True
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 88.000000000000000000
+        Size.Height = 42.000000000000000000
+        Size.PlatformDefault = False
+        Text = 'Run'
+        OnClick = btRunClick
+      end
+      object edCommand: TEdit
+        Touch.InteractiveGestures = [LongTap, DoubleTap]
+        OnTap = edCommandTap
+        Align = Client
+        TextSettings.Font.Family = 'Courier New'
+        TextSettings.Font.Size = 20.000000000000000000
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 536.000000000000000000
+        Size.Height = 42.000000000000000000
+        Size.PlatformDefault = False
+        StyledSettings = [Style, FontColor]
+        OnTyping = edCommandTyping
+        OnKeyDown = edCommandKeyDown
+        OnResized = edCommandResized
+      end
+    end
+    object GridPanelLayoutObjects: TGridPanelLayout
+      Align = Bottom
+      Margins.Left = 4.000000000000000000
+      Margins.Top = 4.000000000000000000
+      Margins.Right = 4.000000000000000000
+      Margins.Bottom = 4.000000000000000000
+      Position.X = 4.000000000000000000
+      Position.Y = 125.000000000000000000
+      Size.Width = 632.000000000000000000
+      Size.Height = 322.000000000000000000
+      Size.PlatformDefault = False
+      ColumnCollection = <
+        item
+          Value = 50.000000000000000000
+        end
+        item
+          Value = 50.000000000000000000
+        end>
+      ControlCollection = <
+        item
+          Column = 0
+          Control = laConst
+          Row = 0
+        end
+        item
+          Column = 1
+          Control = laVar
+          Row = 0
+        end
+        item
+          Column = 0
+          Control = lbConst
+          Row = 1
+        end
+        item
+          Column = 1
+          Control = lbVar
+          Row = 1
+        end
+        item
+          Column = 0
+          Control = laFunction
+          Row = 2
+        end
+        item
+          Column = 1
+          Control = laType
+          Row = 2
+        end
+        item
+          Column = 0
+          Control = lbFunction
+          Row = 3
+        end
+        item
+          Column = 1
+          Control = lbType
+          Row = 3
+        end>
+      RowCollection = <
+        item
+          Value = 10.000000000000000000
+        end
+        item
+          Value = 40.000000000000000000
+        end
+        item
+          Value = 10.000000000000000000
+        end
+        item
+          Value = 40.000000000000000000
+        end
+        item
+          SizeStyle = Auto
+        end>
+      object laConst: TLabel
+        Align = Client
+        StyledSettings = [Family, Style, FontColor]
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 24.200000762939450000
+        Size.PlatformDefault = False
+        TextSettings.Font.Size = 20.000000000000000000
+        Text = 'Constants'
+      end
+      object laVar: TLabel
+        Align = Client
+        StyledSettings = [Family, Style, FontColor]
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 24.200000762939450000
+        Size.PlatformDefault = False
+        TextSettings.Font.Size = 20.000000000000000000
+        Text = 'Variables'
+      end
+      object lbConst: TListBox
+        Align = Client
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 120.800003051757800000
+        Size.PlatformDefault = False
+        DisableFocusEffect = True
+        DefaultItemStyles.ItemStyle = ''
+        DefaultItemStyles.GroupHeaderStyle = ''
+        DefaultItemStyles.GroupFooterStyle = ''
+        OnItemClick = lbObjectItemClick
+        Viewport.Width = 304.000000000000000000
+        Viewport.Height = 116.800000000000000000
+      end
+      object lbVar: TListBox
+        Align = Client
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 120.800003051757800000
+        Size.PlatformDefault = False
+        DisableFocusEffect = True
+        DefaultItemStyles.ItemStyle = ''
+        DefaultItemStyles.GroupHeaderStyle = ''
+        DefaultItemStyles.GroupFooterStyle = ''
+        OnItemClick = lbObjectItemClick
+        Viewport.Width = 304.000000000000000000
+        Viewport.Height = 116.800000000000000000
+      end
+      object laFunction: TLabel
+        Align = Client
+        StyledSettings = [Family, Style, FontColor]
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 24.199996948242190000
+        Size.PlatformDefault = False
+        TextSettings.Font.Size = 20.000000000000000000
+        Text = 'Functions'
+      end
+      object laType: TLabel
+        Align = Client
+        StyledSettings = [Family, Style, FontColor]
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 24.199996948242190000
+        Size.PlatformDefault = False
+        TextSettings.Font.Size = 20.000000000000000000
+        Text = 'Types'
+      end
+      object lbFunction: TListBox
+        Align = Client
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 120.800003051757800000
+        Size.PlatformDefault = False
+        DisableFocusEffect = True
+        DefaultItemStyles.ItemStyle = ''
+        DefaultItemStyles.GroupHeaderStyle = ''
+        DefaultItemStyles.GroupFooterStyle = ''
+        OnItemClick = lbObjectItemClick
+        Viewport.Width = 288.000000000000000000
+        Viewport.Height = 116.800000000000000000
+      end
+      object lbType: TListBox
+        Align = Client
+        Margins.Left = 4.000000000000000000
+        Margins.Top = 4.000000000000000000
+        Margins.Right = 4.000000000000000000
+        Margins.Bottom = 4.000000000000000000
+        Size.Width = 308.000000000000000000
+        Size.Height = 120.800003051757800000
+        Size.PlatformDefault = False
+        DisableFocusEffect = True
+        DefaultItemStyles.ItemStyle = ''
+        DefaultItemStyles.GroupHeaderStyle = ''
+        DefaultItemStyles.GroupFooterStyle = ''
+        OnItemClick = lbObjectItemClick
+        Viewport.Width = 288.000000000000000000
+        Viewport.Height = 116.800000000000000000
+      end
+    end
+    object lwLog: TListView
+      ItemAppearanceClassName = 'TListItemRightDetailAppearance'
+      ItemEditAppearanceClassName = 'TListItemRightDetailDeleteAppearance'
+      HeaderAppearanceClassName = 'TListHeaderObjects'
+      FooterAppearanceClassName = 'TListHeaderObjects'
+      Align = Client
+      Margins.Left = 4.000000000000000000
+      Margins.Top = 4.000000000000000000
+      Margins.Right = 4.000000000000000000
+      Margins.Bottom = 4.000000000000000000
+      Size.Width = 632.000000000000000000
+      Size.Height = 51.000000000000000000
+      Size.PlatformDefault = False
+      ItemAppearance.ItemHeight = 30
+      ItemAppearanceObjects.ItemObjects.Text.Font.Size = 16.000000000000000000
+      ItemAppearanceObjects.ItemObjects.Text.Width = 111.000000000000000000
+      ItemAppearanceObjects.ItemObjects.Text.Height = 44.000000000000000000
+      ItemAppearanceObjects.ItemObjects.Accessory.Visible = False
+      ItemAppearanceObjects.ItemObjects.Detail.Font.Family = 'Courier New'
+      ItemAppearanceObjects.ItemObjects.Detail.Font.Size = 16.000000000000000000
+      ItemAppearanceObjects.ItemObjects.Detail.TextAlign = Leading
+      ItemAppearanceObjects.ItemObjects.Detail.WordWrap = True
+      ItemAppearanceObjects.HeaderObjects.Text.Font.Family = 'Courier New'
+      ItemAppearanceObjects.HeaderObjects.Text.Font.Size = 16.000000000000000000
+    end
+    object Splitter1: TSplitter
+      Align = Bottom
+      Cursor = crVSplit
+      MinSize = 20.000000000000000000
+      Position.Y = 109.000000000000000000
+      Size.Width = 640.000000000000000000
+      Size.Height = 12.000000000000000000
+      Size.PlatformDefault = False
+    end
+  end
+  object pnSuggestBack: TPanel
+    Align = Client
+    Opacity = 0.500000000000000000
+    Margins.Top = 50.000000000000000000
+    Size.Width = 640.000000000000000000
+    Size.Height = 401.000000000000000000
+    Size.PlatformDefault = False
+    OnClick = pnSuggestBackClick
+  end
+  object pnSuggest: TPanel
+    Anchors = [akLeft, akTop, akRight]
+    Position.X = 4.000000000000000000
+    Position.Y = 48.000000000000000000
+    Size.Width = 577.000000000000000000
+    Size.Height = 99.000000000000000000
+    Size.PlatformDefault = False
+    object lbSuggest: TListBox
+      Align = Client
+      Margins.Left = 4.000000000000000000
+      Margins.Top = 4.000000000000000000
+      Margins.Right = 4.000000000000000000
+      Margins.Bottom = 4.000000000000000000
+      Size.Width = 569.000000000000000000
+      Size.Height = 91.000000000000000000
+      Size.PlatformDefault = False
+      DisableFocusEffect = True
+      DefaultItemStyles.ItemStyle = ''
+      DefaultItemStyles.GroupHeaderStyle = ''
+      DefaultItemStyles.GroupFooterStyle = ''
+      OnItemClick = lbSuggestItemClick
+      Viewport.Width = 565.000000000000000000
+      Viewport.Height = 87.000000000000000000
+    end
+  end
+end
