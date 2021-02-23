@@ -1,3 +1,28 @@
+////////////////////////////////////////////////////////////////////////////////
+/// MFL Parser library for Delphi                                            ///
+/// ------------------------------------------------------------------------ ///
+/// Written by: Dennis Göhlert                                               ///
+/// Official repository: https://github.com/Manhunter07/MFL                  ///
+///                                                                          ///
+/// PROJECT DESCRIPTION:                                                     ///
+/// MFL is a functional scripting language written in Delphi.                ///
+/// It comes with a console expression parser, an editor and a FireMonkey    ///
+/// expression evaluator with GUI, for both desktop and mobile platforms.    ///
+/// The compiler itself runs on all platforms and does not use pointer       ///
+/// types.                                                                   ///
+///                                                                          ///
+/// LICENSE DISCLAIMER:                                                      ///
+/// This project is copyrighted with all rights reserved. It is freely       ///
+/// available to the public, for both noncommercial and commercial use.      ///
+/// You may edit and/or redistribute it as a whole.                          ///
+/// This header must not be removed, moved or changed.                       ///
+/// The terms of use may be changed by the project owner at any time and     ///
+/// changes affect any commits dated at or after the time the updated terms  ///
+/// have been released. Previews released are unaffected.                    ///
+///                                                                          ///
+/// Last updated: 2021-02-22                                                 ///
+////////////////////////////////////////////////////////////////////////////////
+
 unit uOptions;
 
 interface

@@ -1,3 +1,28 @@
+////////////////////////////////////////////////////////////////////////////////
+/// MFL Parser library for Delphi                                            ///
+/// ------------------------------------------------------------------------ ///
+/// Written by: Dennis Göhlert                                               ///
+/// Official repository: https://github.com/Manhunter07/MFL                  ///
+///                                                                          ///
+/// PROJECT DESCRIPTION:                                                     ///
+/// MFL is a functional scripting language written in Delphi.                ///
+/// It comes with a console expression parser, an editor and a FireMonkey    ///
+/// expression evaluator with GUI, for both desktop and mobile platforms.    ///
+/// The compiler itself runs on all platforms and does not use pointer       ///
+/// types.                                                                   ///
+///                                                                          ///
+/// LICENSE DISCLAIMER:                                                      ///
+/// This project is copyrighted with all rights reserved. It is freely       ///
+/// available to the public, for both noncommercial and commercial use.      ///
+/// You may edit and/or redistribute it as a whole.                          ///
+/// This header must not be removed, moved or changed.                       ///
+/// The terms of use may be changed by the project owner at any time and     ///
+/// changes affect any commits dated at or after the time the updated terms  ///
+/// have been released. Previews released are unaffected.                    ///
+///                                                                          ///
+/// Last updated: 2021-02-22                                                 ///
+////////////////////////////////////////////////////////////////////////////////
+
 unit Parser;
 
 interface
@@ -71,17 +96,19 @@ type
     procedure Define(const AParser: TParser; const AValue: TParserValue);
   end;
 
-  TParserOptions = class
+  TParserOptions = class(TPersistent)
   private
     FWarnings: Boolean;
     FOptimization: Boolean;
     FAllowed: TParserExpressionKinds;
-    FInitialValue: TParserValue;
+    FInitialType: TParserValueKind;
+  protected
+    procedure AssignTo(Dest: TPersistent); override;
   public
     property Warnings: Boolean read FWarnings write FWarnings;
     property Optimization: Boolean read FOptimization write FOptimization;
     property Allowed: TParserExpressionKinds read FAllowed write FAllowed;
-    property InitialValue: TParserValue read FInitialValue write FInitialValue;
+    property InitialType: TParserValueKind read FInitialType write FInitialType;
     constructor Create;
   end;
 
@@ -373,7 +400,7 @@ constructor TParserOptionHelper.Create(const AName: String);
 var
   LIndex: Integer;
 begin
-  LIndex := IndexText(AName, ['Warnings', 'Optimization', 'Allowed', 'InitialValue']);
+  LIndex := IndexText(AName, ['Warnings', 'Optimization', 'Allowed', 'InitialType']);
   if not (LIndex in [Ord(Low(TParserOption)) .. Ord(High(TParserOption))]) then
   begin
     raise EParserOptionError.CreateFmt('Option %s not not', [AName.QuotedString]);
@@ -410,19 +437,37 @@ begin
       end;
     poInitialValue:
       begin
-        AParser.Options.InitialValue := AValue;
+        if not InRange(AValue.AsInteger, Ord(Low(TParserValueKind)), Ord(High(TParserValueKind))) then
+        begin
+          raise EParserOptionError.Create('Fehlermeldung');
+        end;
+        AParser.Options.InitialType := TParserValueKind(AValue.AsInteger);
       end;
   end;
 end;
 
 { TParserOptions }
 
+procedure TParserOptions.AssignTo(Dest: TPersistent);
+begin
+  if Dest is TParserOptions then
+  begin
+    (Dest as TParserOptions).Warnings := Warnings;
+    (Dest as TParserOptions).Optimization := Optimization;
+    (Dest as TParserOptions).Allowed := Allowed;
+    (Dest as TParserOptions).InitialType := InitialType;
+  end else
+  begin
+    inherited;
+  end;
+end;
+
 constructor TParserOptions.Create;
 begin
   Warnings := True;
   Optimization := True;
   Allowed := [Low(TParserExpressionKind) .. High(TParserExpressionKind)];
-  InitialValue := TParserValue.Empty[vkDouble];
+  InitialType := vkDouble;
 end;
 
 { TParser }
@@ -516,7 +561,6 @@ var
         var
           LOperator: TParserOperator;
           LNewNode: TParserParentNode;
-          LSubTree: TParserTree;
           LDelegateFunct: TParserCustomFunction;
           LDelegateFunctParams: TList<TParserParam>;
           LDelegateSyntaxTree: TParserTree;
@@ -867,7 +911,7 @@ var
                   kwThen, kwElse, kwExcept:
                     begin
                       LNode := LNode.Parent;
-                      ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters);
+                      ExpectToken([tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkSymbolBraceOp, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[stNone, nkNone]);
                       Exit;
                     end;
                   kwRet:
@@ -928,7 +972,6 @@ var
       );
     var
       LDefValSyntaxTree: TParserTree;
-      LEndingToken: TParserTokenKind;
       LNames: TStringList;
       LName: String;
       LType: IParserValueConstraint;
@@ -1088,7 +1131,7 @@ var
               end;
             end else
             begin
-              LValue := Options.InitialValue;
+              LValue := TParserValue.Empty[Options.InitialType];
             end;
             for LObjectName in LObjectNames do
             begin

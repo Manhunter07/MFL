@@ -41,7 +41,7 @@ object fmOptions: TfmOptions
         BevelOuter = bvNone
         ColumnCollection = <
           item
-            Value = 49.721827901521340000
+            Value = 49.637777305781310000
           end
           item
             Value = 50.413223140495870000
@@ -142,7 +142,6 @@ object fmOptions: TfmOptions
           Height = 21
           Align = alClient
           Caption = 'Initial variable type:'
-          Layout = tlCenter
           ExplicitTop = 53
           ExplicitWidth = 190
           ExplicitHeight = 13
