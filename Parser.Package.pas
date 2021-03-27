@@ -838,36 +838,26 @@ begin
     end));
   FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Map', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('MapFunction', LTypes.Ref)],
     function (Params: TArray<TParserValue>): TParserValue
-    var
-      LValues: TArray<TParserValue>;
-    begin
 
-    end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Filter', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('FilterRef', LTypes.Ref)],
-    function (Params: TArray<TParserValue>): TParserValue
-    begin
-
-    end));
-  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Reduce', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('ReduceFunction', LTypes.Ref)],
-    function (Params: TArray<TParserValue>): TParserValue
-
-      procedure ReduceArray;
+      function MapArray(const AArray: TArray<TParserValue>): TArray<TParserValue>;
       var
-        LMember: TParserValue;
+        LIndex: Integer;
       begin
-        for LMember in Params[0].AsArray do
+        SetLength(Result, Length(AArray));
+        for LIndex := Low(Result) to High(Result) do
         begin
-
+          Result[LIndex] := Params[1].AsReference.Value[[AArray[LIndex]]];
         end;
       end;
 
-      procedure ReduceRecord;
+      function MapRecord(const ARecord: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
       var
-        LField: TPair<String, TParserValue>;
+        LIndex: Integer;
       begin
-        for LField in Params[0].AsRecord do
+        SetLength(Result, Length(ARecord));
+        for LIndex := Low(Result) to High(Result) do
         begin
-
+          Result[LIndex] := TPair<String, TParserValue>.Create(ARecord[LIndex].Key, Params[1].AsReference.Value[[ARecord[LIndex].Value]]);
         end;
       end;
 
@@ -875,11 +865,105 @@ begin
       case Params[0].Kind of
         vkString, vkArray:
           begin
-            ReduceArray;
+            Result := TParserValue.Create(MapArray(Params[0].AsArray));
           end;
         vkRecord:
           begin
-            ReduceRecord;
+            Result := TParserValue.Create(MapRecord(Params[0].AsRecord));
+          end;
+      end;
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Filter', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('FilterRef', LTypes.Ref)],
+    function (Params: TArray<TParserValue>): TParserValue
+
+      function FilterArray(const AArray: TArray<TParserValue>): TArray<TParserValue>;
+      var
+        LFiltered: TList<TParserValue>;
+        LValue: TParserValue;
+      begin
+        LFiltered := TList<TParserValue>.Create;
+        try
+          LFiltered.Capacity := Length(Params[0].AsArray);
+          for LValue in Params[0].AsArray do
+          begin
+            if Params[1].AsReference.Value[[LValue]].AsBoolean then
+            begin
+              LFiltered.Add(LValue);
+            end;
+          end;
+          Result := LFiltered.ToArray;
+        finally
+          LFiltered.Free;
+        end;
+      end;
+
+      function FilterRecord(const ARecord: TArray<TPair<String, TParserValue>>): TArray<TPair<String, TParserValue>>;
+      var
+        LFiltered: TList<TPair<String, TParserValue>>;
+        LValue: TPair<String, TParserValue>;
+      begin
+        LFiltered := TList<TPair<String, TParserValue>>.Create;
+        try
+          LFiltered.Capacity := Length(Params[0].AsRecord);
+          for LValue in Params[0].AsRecord do
+          begin
+            if Params[1].AsReference.Value[[LValue.Value]].AsBoolean then
+            begin
+              LFiltered.Add(LValue);
+            end;
+          end;
+          Result := LFiltered.ToArray;
+        finally
+          LFiltered.Free;
+        end;
+      end;
+
+    begin
+      case Params[0].Kind of
+        vkString, vkArray:
+          begin
+            Result := TParserValue.Create(FilterArray(Params[0].AsArray));
+          end;
+        vkRecord:
+          begin
+            Result := TParserValue.Create(FilterRecord(Params[0].AsRecord));
+          end;
+      end;
+    end));
+  FDefaultPackage.Dictionary.Add(TParserReferenceFunction.Create('Reduce', [TParserParam.Create('Values', LTypes.Struct), TParserParam.Create('ReduceFunction', LTypes.Ref)],
+    function (Params: TArray<TParserValue>): TParserValue
+
+      function ReduceArray(const AArray: TArray<TParserValue>): TParserValue;
+      var
+        LValue: TParserValue;
+      begin
+        Result := TParserValue.Empty[vkDouble];
+        for LValue in Params[0].AsArray do
+        begin
+          Result := Params[1].AsReference.Value[[Result, LValue]];
+        end;
+      end;
+
+      function ReduceRecord(const ARecord: TArray<TPair<String, TParserValue>>): TParserValue;
+      var
+        LValue: TPair<String, TParserValue>;
+      begin
+        Result := TParserValue.Empty[vkDouble];
+        for LValue in Params[0].AsRecord do
+        begin
+          Result := Params[1].AsReference.Value[[Result, LValue.Value]];
+        end;
+      end;
+
+    begin
+      case Params[0].Kind of
+        vkString, vkArray:
+          begin
+            Result := ReduceArray(Params[0].AsArray);
+          end;
+        vkRecord:
+          begin
+            Result := ReduceRecord(Params[0].AsRecord);
           end;
       end;
     end));
@@ -1195,8 +1279,10 @@ begin
 end;
 
 class function TParserCustomPackage.FileExtension: String;
+const
+  LDefaultFileExtension = '.mfl';
 begin
-  Result := '.mfl';
+  Result := LDefaultFileExtension;
 end;
 
 procedure TParserCustomPackage.LoadFromFile;

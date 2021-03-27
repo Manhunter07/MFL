@@ -52,7 +52,7 @@ type
 
   TParserExporter = class abstract
   private
-    FTarget: TStringList;
+    FTarget: TStrings;
   protected
     class function ReferenceToString(const AReference: IParserValueRefTarget): String; virtual; abstract;
     class function DoubleToString(const ADouble: Double): String; virtual; abstract;
@@ -68,10 +68,10 @@ type
     class function Title: String; virtual;
     class function CanExport(const AObject: TParserObject): Boolean; virtual;
     class function ValueToString(const AValue: TParserValue): String;
-    property Target: TStringList read FTarget write FTarget;
-    constructor Create(const ATarget: TStringList);
-    procedure &Export(const AObject: TParserObject); overload;
-    procedure &Export(const ADictionary: TParserDictionary; AName: String = String.Empty); overload;
+    property Target: TStrings read FTarget write FTarget;
+    constructor Create(const ATarget: TStrings);
+    function &Export(const AObject: TParserObject): Integer; overload;
+    function &Export(const ADictionary: TParserDictionary; AName: String = String.Empty): Integer; overload;
   end;
 
   TParserCodeExporter = class(TParserExporter)
@@ -82,6 +82,7 @@ type
     FDeclPatternType = ': %s';
     FDeclPatternParams = '(%s)';
   private
+    FAddObjects: Boolean;
     class function ParamToString(const AParam: TParserParam): String;
     class function SyntaxTreeToString(const ASyntaxTree: TParserTree): String;
     class function TypeToString(const AType: TParserType): String;
@@ -96,6 +97,10 @@ type
     procedure ExportVariable(const AVariable: TParserVariable); override;
     procedure ExportFunction(const AFunction: TParserFunction; const AKind: TParserFunctionKind = fkFunction); override;
     procedure ExportType(const AType: TParserType); override;
+    procedure AddLine(const ALine: String; const AObject: TObject = nil); inline;
+  public
+    property AddObjects: Boolean read FAddObjects;
+    constructor Create(const ATarget: TStrings; const AAddObjects: Boolean = False);
   end;
 
 implementation
@@ -193,26 +198,67 @@ begin
   Result := True;
 end;
 
-constructor TParserExporter.Create(const ATarget: TStringList);
+constructor TParserExporter.Create(const ATarget: TStrings);
 begin
   inherited Create;
   Target := ATarget;
 end;
 
-procedure TParserExporter.Export(const ADictionary: TParserDictionary; AName: String);
+function TParserExporter.Export(const ADictionary: TParserDictionary; AName: String): Integer;
 var
   LObject: TParserObject;
 begin
   if AName.IsEmpty then
   begin
+    Result := 0;
     for LObject in ADictionary do
     begin
-      &Export(LObject);
+      Result := Result + &Export(LObject);
     end;
   end else
   begin
-    &Export(ADictionary[AName]);
+    Result := &Export(ADictionary[AName]);
   end;
+end;
+
+function TParserExporter.Export(const AObject: TParserObject): Integer;
+var
+  LOldCount: Integer;
+  LTitle: String;
+begin
+  if not CanExport(AObject) then
+  begin
+    raise EParserExportUnsupportedError.CreateFmt('%s not exportable', [AObject.Name.QuotedString]);
+  end;
+  LOldCount := Target.Count;
+  case TParserObjectKind.Create(AObject) of
+    okUnknown:
+      begin
+        LTitle := Title;
+        if LTitle.IsEmpty then
+        begin
+          raise EParserExportUnsupportedError.CreateFmt('%s not exportable', [AObject.Name.QuotedString]);
+        end;
+        raise EParserExportUnsupportedError.CreateFmt('%s not exportable as %s', [AObject.Name.QuotedString, LTitle]);
+      end;
+    okConstant:
+      begin
+        ExportConstant(AObject as TParserConstant);
+      end;
+    okVariable:
+      begin
+        ExportVariable(AObject as TParserVariable);
+      end;
+    okFunction:
+      begin
+        ExportFunction(AObject as TParserFunction);
+      end;
+    okType:
+      begin
+        ExportType(AObject as TParserType);
+      end;
+  end;
+  Result := Target.Count - LOldCount;
 end;
 
 class function TParserExporter.ValueToString(const AValue: TParserValue): String;
@@ -246,44 +292,18 @@ begin
   Result := String.Empty;
 end;
 
-procedure TParserExporter.Export(const AObject: TParserObject);
-var
-  LTitle: String;
+{ TParserCodeExporter }
+
+procedure TParserCodeExporter.AddLine(const ALine: String; const AObject: TObject);
 begin
-  if not CanExport(AObject) then
+  if AddObjects then
   begin
-    raise EParserExportUnsupportedError.CreateFmt('%s not exportable', [AObject.Name.QuotedString]);
-  end;
-  case TParserObjectKind.Create(AObject) of
-    okUnknown:
-      begin
-        LTitle := Title;
-        if LTitle.IsEmpty then
-        begin
-          raise EParserExportUnsupportedError.CreateFmt('%s not exportable', [AObject.Name.QuotedString]);
-        end;
-        raise EParserExportUnsupportedError.CreateFmt('%s not exportable as %s', [AObject.Name.QuotedString, LTitle]);
-      end;
-    okConstant:
-      begin
-        ExportConstant(AObject as TParserConstant);
-      end;
-    okVariable:
-      begin
-        ExportVariable(AObject as TParserVariable);
-      end;
-    okFunction:
-      begin
-        ExportFunction(AObject as TParserFunction);
-      end;
-    okType:
-      begin
-        ExportType(AObject as TParserType);
-      end;
+    Target.AddObject(ALine, AObject);
+  end else
+  begin
+    Target.Add(ALine);
   end;
 end;
-
-{ TParserCodeExporter }
 
 class function TParserCodeExporter.ArrayToString(const AArray: TArray<TParserValue>): String;
 const
@@ -303,6 +323,12 @@ begin
   finally
     LValues.Free;
   end;
+end;
+
+constructor TParserCodeExporter.Create(const ATarget: TStrings; const AAddObjects: Boolean);
+begin
+  inherited Create(ATarget);
+  FAddObjects := AAddObjects;
 end;
 
 class function TParserCodeExporter.DoubleToString(const ADouble: Double): String;
@@ -343,7 +369,7 @@ begin
   try
     LBuilder.AppendFormat(FDeclPatternIntro, [kwAlias.ToString, AAlias]);
     LBuilder.AppendFormat(FDeclPatternValue, [AName]);
-    Target.Add(LBuilder.ToString);
+    AddLine(LBuilder.ToString);
   finally
     LBuilder.Free;
   end;
@@ -357,7 +383,7 @@ begin
   try
     LBuilder.AppendFormat(FDeclPatternIntro, [kwConstant.ToString, AConstant.Name]);
     LBuilder.AppendFormat(FDeclPatternValue, [ValueToString(AConstant.Value[[]])]);
-    Target.Add(LBuilder.ToString);
+    AddLine(LBuilder.ToString, AConstant);
   finally
     LBuilder.Free;
   end;
@@ -393,7 +419,7 @@ begin
         LBody := FBuiltInBody;
       end;
       LBuilder.AppendFormat(FDeclPatternValue, [LBody]);
-      Target.Add(LBuilder.ToString);
+      AddLine(LBuilder.ToString, AFunction);
     finally
       LBuilder.Free;
     end;
@@ -471,7 +497,7 @@ begin
       begin
         LBuilder.AppendFormat(FDeclPatternParams, [String.Join(', ', LArgs.ToStringArray)]);
       end;
-      Target.Add(LBuilder.ToString);
+      AddLine(LBuilder.ToString, AType);
       if Assigned(AType.&Constructor) then
       begin
         ExportFunction(AType.&Constructor, fkConstructor);
@@ -498,7 +524,7 @@ begin
     begin
       LBuilder.AppendFormat(FDeclPatternValue, [ValueToString(LValue)]);
     end;
-    Target.Add(LBuilder.ToString);
+    AddLine(LBuilder.ToString, AVariable);
   finally
     LBuilder.Free;
   end;

@@ -296,7 +296,13 @@ begin
       end;
     tkName:
       begin
-        Result := Name;
+        if Keyword = kwNone then
+        begin
+          Result := Name;
+        end else
+        begin
+          Result := Keyword.ToString;
+        end;
       end;
   end;
 end;

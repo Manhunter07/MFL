@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<BorlandProject>
+	<Transactions>
+    <Transaction>1899.12.30 00:00:00.000.483,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.102,C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Value.pas=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.923,C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Delegation.pas=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Delegate.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.513,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Export.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.668,C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Export.pas=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Exporter.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.355,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.446,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.861,C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Parser.Delegation.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.503,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+    <Transaction>1899.12.30 00:00:00.000.261,=C:\Users\dengo\Documents\Embarcadero\Studio\Projekte\ConsoleExprParser\Unit1.pas</Transaction>
+  </Transactions>
+	<BT_BuildType>Debug</BT_BuildType>
+	<ProjectSortOrder AutoSort="0" SortType="0">
+    <File Path="Parser.Dictionary.pas"/>
+    <File Path="Parser.Exception.pas"/>
+    <File Path="Parser.Exporter.pas"/>
+    <File Path="Parser.Language.pas"/>
+    <File Path="Parser.Lexer.pas"/>
+    <File Path="Parser.Package.pas"/>
+    <File Path="Parser.pas"/>
+    <File Path="Parser.Syntax.pas"/>
+    <File Path="Parser.Value.pas"/>
+  </ProjectSortOrder>
+</BorlandProject>

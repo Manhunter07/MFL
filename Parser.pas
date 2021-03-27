@@ -88,7 +88,7 @@ type
     constructor Create(const AParser: TParser; const AName: String);
   end;
 
-  TParserOption = (poWarnings, poOptimization, poAllowed, poInitialValue);
+  TParserOption = (poWarnings, poOptimization, poAllowed, poInitialValue, poPackagePaths);
 
   TParserOptionHelper = record helper for TParserOption
   public
@@ -97,11 +97,14 @@ type
   end;
 
   TParserOptions = class(TPersistent)
+  strict private
+    procedure PackagePathsChange(Sender: TObject);
   private
     FWarnings: Boolean;
     FOptimization: Boolean;
     FAllowed: TParserExpressionKinds;
     FInitialType: TParserValueKind;
+    FPackagePaths: TStringList;
   protected
     procedure AssignTo(Dest: TPersistent); override;
   public
@@ -109,17 +112,16 @@ type
     property Optimization: Boolean read FOptimization write FOptimization;
     property Allowed: TParserExpressionKinds read FAllowed write FAllowed;
     property InitialType: TParserValueKind read FInitialType write FInitialType;
+    property PackagePaths: TStringList read FPackagePaths;
     constructor Create;
+    destructor Destroy; override;
   end;
 
   TParser = class(TSingletonImplementation, IParserValueSupplier, IParserPackageLinks)
-  strict private
-    procedure PackagePathsChange(Sender: TObject);
   private
     FDictionary: TParserDictionary;
     FPackages: TObjectDictionary<String, TParserPackage>;
     FOrderedPackageNames: TStringList;
-    FPackagePaths: TStringList;
     FOptions: TParserOptions;
     function GetValues(const AName: String; const AArgs: TArray<TParserValue>): TParserValue;
     function GetRefTargets(const AName: String): IParserValueRefTarget;
@@ -144,7 +146,6 @@ type
     property PackageNames[const AIndex: Integer]: String read GetPackageNames;
     property PackageCount: Integer read GetPackageCount;
     property StandardPackages: TParserStandardPackages read GetStandardPackages write SetStandardPackages;
-    property PackagePaths: TStringList read FPackagePaths;
     property Objects[const AName: String]: TParserObject read GetObjects;
     property Options: TParserOptions read FOptions;
     constructor Create;
@@ -400,10 +401,10 @@ constructor TParserOptionHelper.Create(const AName: String);
 var
   LIndex: Integer;
 begin
-  LIndex := IndexText(AName, ['Warnings', 'Optimization', 'Allowed', 'InitialType']);
+  LIndex := IndexText(AName, ['Warnings', 'Optimization', 'Allowed', 'InitialType', 'PackagePaths']);
   if not (LIndex in [Ord(Low(TParserOption)) .. Ord(High(TParserOption))]) then
   begin
-    raise EParserOptionError.CreateFmt('Option %s not not', [AName.QuotedString]);
+    raise EParserOptionError.CreateFmt('Option %s not found', [AName.QuotedString]);
   end;
   Self := TParserOption(LIndex);
 end;
@@ -439,9 +440,14 @@ begin
       begin
         if not InRange(AValue.AsInteger, Ord(Low(TParserValueKind)), Ord(High(TParserValueKind))) then
         begin
-          raise EParserOptionError.Create('Fehlermeldung');
+          raise EParserOptionError.Create('Invalid value kind');
         end;
         AParser.Options.InitialType := TParserValueKind(AValue.AsInteger);
+      end;
+    poPackagePaths:
+      begin
+        AParser.Options.PackagePaths.Clear;
+        AParser.Options.PackagePaths.AddStrings(AValue.AsArray.AsStrings);
       end;
   end;
 end;
@@ -468,6 +474,28 @@ begin
   Optimization := True;
   Allowed := [Low(TParserExpressionKind) .. High(TParserExpressionKind)];
   InitialType := vkDouble;
+  FPackagePaths := TStringList.Create;
+  PackagePaths.OnChange := PackagePathsChange;
+end;
+
+destructor TParserOptions.Destroy;
+begin
+  PackagePaths.Free;
+  inherited;
+end;
+
+procedure TParserOptions.PackagePathsChange(Sender: TObject);
+var
+  LIndex: Integer;
+begin
+  PackagePaths.OnChange := Default(TNotifyEvent);
+  PackagePaths.BeginUpdate;
+  for LIndex := 0 to Pred(PackagePaths.Count) do
+  begin
+    PackagePaths[LIndex] := IncludeTrailingPathDelimiter(PackagePaths[LIndex]);
+  end;
+  PackagePaths.EndUpdate;
+  PackagePaths.OnChange := PackagePathsChange;
 end;
 
 { TParser }
@@ -502,15 +530,12 @@ begin
   FOrderedPackageNames := TStringList.Create(dupError, False, False);
   RegisterPackage(TParserPackage.DefaultPackage);
   StandardPackages := TParserStandardPackages.DefaultPackages;
-  FPackagePaths := TStringList.Create;
-  PackagePaths.OnChange := PackagePathsChange;
   FOptions := TParserOptions.Create;
 end;
 
 destructor TParser.Destroy;
 begin
   Options.Free;
-  PackagePaths.Free;
   UnregisterPackage(TParserPackage.DefaultPackage.Name);
   FOrderedPackageNames.Free;
   FPackages.Free;
@@ -903,7 +928,7 @@ var
                       end;
                     end;
                 end;
-                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
+                ExpectToken([tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolParOp, tkSymbolBrackOp, tkSymbolBraceOp, tkNumberDec, tkNumberHex, tkText, tkName], TParserKeyword.BlockStarters + TParserKeyword.Allowed[ASyntaxTreeKind, ANodeKind]);
               end;
             tkName:
               begin
@@ -1314,6 +1339,10 @@ var
           LObjectNames := TStringList.Create;
           try
             ParseObjectNames([tkEnd]);
+            for LObjectName in LObjectNames do
+            begin
+              LoadPackage(LObjectName);
+            end;
           finally
             LObjectNames.Free;
           end;
@@ -1425,23 +1454,13 @@ var
   LIndex: Integer;
   LFileName: String;
 begin
-  for LIndex := Pred(PackagePaths.Count) downto 0 do
+  for LIndex := Pred(Options.PackagePaths.Count) downto 0 do
   begin
-    LFileName := ChangeFileExt(Concat(PackagePaths[LIndex], AName), TParserCustomPackage.FileExtension);
+    LFileName := ChangeFileExt(Concat(Options.PackagePaths[LIndex], AName), TParserCustomPackage.FileExtension);
     if FileExists(LFileName) then
     begin
       RegisterPackage(TParserCustomPackage.Create(LFileName));
     end;
-  end;
-end;
-
-procedure TParser.PackagePathsChange(Sender: TObject);
-var
-  LIndex: Integer;
-begin
-  for LIndex := 0 to Pred(PackagePaths.Count) do
-  begin
-    PackagePaths[LIndex] := IncludeTrailingPathDelimiter(PackagePaths[LIndex]);
   end;
 end;
 
