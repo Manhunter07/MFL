@@ -48,16 +48,14 @@ object fmMain: TfmMain
     Gutter.Font.Height = -11
     Gutter.Font.Name = 'Consolas'
     Gutter.Font.Style = []
-    ExplicitLeft = 80
-    ExplicitTop = 64
-    ExplicitWidth = 200
-    ExplicitHeight = 150
+    OnChange = edCodeChange
   end
   object ActionMainMenuBar: TActionMainMenuBar
     Left = 0
     Top = 0
     Width = 800
     Height = 25
+    UseSystemFont = False
     ActionManager = ActionManager
     Color = clMenuBar
     ColorMap.DisabledFontColor = 7171437
@@ -65,15 +63,11 @@ object fmMain: TfmMain
     ColorMap.BtnSelectedFont = clBlack
     ColorMap.UnusedColor = clWhite
     Font.Charset = DEFAULT_CHARSET
-    Font.Color = clWindowText
+    Font.Color = clBlack
     Font.Height = -12
     Font.Name = 'Segoe UI'
     Font.Style = []
     Spacing = 0
-    ExplicitLeft = 112
-    ExplicitTop = 24
-    ExplicitWidth = 150
-    ExplicitHeight = 29
   end
   object StatusBar: TStatusBar
     Left = 0
@@ -81,9 +75,6 @@ object fmMain: TfmMain
     Width = 800
     Height = 19
     Panels = <>
-    ExplicitLeft = 328
-    ExplicitTop = 160
-    ExplicitWidth = 0
   end
   object pnLog: TPanel
     Left = 0
@@ -94,8 +85,6 @@ object fmMain: TfmMain
     BevelOuter = bvNone
     TabOrder = 3
     Visible = False
-    ExplicitTop = 160
-    ExplicitWidth = 635
     DesignSize = (
       800
       120)
@@ -113,8 +102,6 @@ object fmMain: TfmMain
       TabIndex = 0
       OnChange = tcLogChange
       OnChanging = tcLogChanging
-      ExplicitTop = 0
-      ExplicitWidth = 629
       object lbLog: TListBox
         AlignWithMargins = True
         Left = 7
@@ -124,10 +111,6 @@ object fmMain: TfmMain
         Align = alClient
         ItemHeight = 13
         TabOrder = 0
-        ExplicitLeft = 56
-        ExplicitTop = 40
-        ExplicitWidth = 121
-        ExplicitHeight = 97
       end
     end
     object pnLogButtons: TFlowPanel
@@ -264,7 +247,7 @@ object fmMain: TfmMain
           end>
         ActionBar = ActionMainMenuBar
       end>
-    Left = 584
+    Left = 720
     Top = 8
     StyleName = 'Platform Default'
     object acFileNew: TAction
@@ -382,7 +365,7 @@ object fmMain: TfmMain
         FileMask = '*.*'
       end>
     Options = []
-    Left = 584
+    Left = 720
     Top = 56
   end
   object FileSaveDialog: TFileSaveDialog
@@ -398,11 +381,11 @@ object fmMain: TfmMain
         FileMask = '*.*'
       end>
     Options = []
-    Left = 584
+    Left = 720
     Top = 104
   end
   object PopupActionBar: TPopupActionBar
-    Left = 584
+    Left = 720
     Top = 152
     object miCopy: TMenuItem
       Action = acEditCopy
@@ -416,5 +399,37 @@ object fmMain: TfmMain
     object miDelete: TMenuItem
       Action = acEditDelete
     end
+  end
+  object SynCompletionProposal: TSynCompletionProposal
+    Options = [scoLimitToMatchedText, scoUseInsertList, scoUsePrettyText, scoUseBuiltInTimer, scoEndCharCompletion, scoCompleteWithTab, scoCompleteWithEnter]
+    EndOfTokenChr = '()[]. '
+    TriggerChars = '.'
+    Font.Charset = DEFAULT_CHARSET
+    Font.Color = clWindowText
+    Font.Height = -11
+    Font.Name = 'Courier New'
+    Font.Style = []
+    TitleFont.Charset = DEFAULT_CHARSET
+    TitleFont.Color = clBtnText
+    TitleFont.Height = -11
+    TitleFont.Name = 'MS Shell Dlg 2'
+    TitleFont.Style = [fsBold]
+    Columns = <
+      item
+        ColumnWidth = 50
+        DefaultFontStyle = [fsBold]
+      end
+      item
+        ColumnWidth = 50
+      end
+      item
+        ColumnWidth = 100
+      end>
+    Resizeable = True
+    OnExecute = SynCompletionProposalExecute
+    ShortCut = 16416
+    Editor = edCode
+    Left = 720
+    Top = 200
   end
 end

@@ -139,6 +139,8 @@ type
     constructor Create(const AFrom, ATo, AStep: Double); overload;
   end;
 
+  TParserValueEvent = procedure (Sender: TObject; const AValue: TParserValue) of object;
+
   IParserValueConstraint = interface
     ['{0E0905C6-427E-41FC-92EE-F31A0FC73AF4}']
     function GetSupported(const AValue: TParserValue): Boolean;

@@ -72,9 +72,11 @@ begin
     begin
       raise EParserDictionaryDuplicateError.CreateFmt('Redeclared identifier: %s', [AObject.Name.QuotedString]);
     end;
-    FObjects.Remove(AObject.Name);
+    (Self[AObject.Name] as IParserWritableObject).Value := AObject.Value[[]];
+  end else
+  begin
+    FObjects.Add(AObject.Name, AObject);
   end;
-  FObjects.Add(AObject.Name, AObject);
 end;
 
 procedure TParserDictionary.AddAlias(const AAlias, AName: String);

@@ -30,9 +30,10 @@ interface
 uses
   Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
   Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.ComCtrls, Vcl.ToolWin, Vcl.ActnMan,
-  Vcl.ActnCtrls, Vcl.ActnMenus, System.Actions, Vcl.ActnList,
-  Vcl.PlatformDefaultStyleActnCtrls, SynEdit, SynHighlighterMFL, Vcl.Menus,
-  Vcl.ActnPopup, Parser, Parser.Package, Vcl.StdCtrls, Vcl.ExtCtrls;
+  Vcl.ActnCtrls, Vcl.ActnMenus, System.Actions, Vcl.ActnList, System.UITypes, Parser.Syntax,
+  Vcl.PlatformDefaultStyleActnCtrls, SynEdit, SynHighlighterMFL, Vcl.Menus, SynEditHighlighter,
+  Vcl.ActnPopup, Parser, Parser.Package, Parser.Language, Vcl.StdCtrls, Vcl.ExtCtrls,
+  SynCompletionProposal, Parser.Exporter, Parser.Lexer, SynEditExport, SynExportTeX;
 
 type
   TfmMain = class(TForm)
@@ -69,6 +70,7 @@ type
     lbLog: TListBox;
     pnLogButtons: TFlowPanel;
     btLogClose: TButton;
+    SynCompletionProposal: TSynCompletionProposal;
     procedure acViewStatusBarExecute(Sender: TObject);
     procedure acFileNewExecute(Sender: TObject);
     procedure acFileOpenExecute(Sender: TObject);
@@ -97,14 +99,24 @@ type
     procedure acProgramRunExecute(Sender: TObject);
     procedure btLogCloseClick(Sender: TObject);
     procedure tcLogChanging(Sender: TObject; var AllowChange: Boolean);
+    procedure edCodeChange(Sender: TObject);
+    procedure SynCompletionProposalExecute(Kind: SynCompletionType;
+      Sender: TObject; var CurrentInput: string; var x, y: Integer;
+      var CanExecute: Boolean);
   private
+    FFileModified: Boolean;
+    FCodeModified: Boolean;
     FFileName: String;
     FHighlighter: TSynMflSyn;
     FOptions: TParserOptions;
     FStandardPackages: TParserStandardPackages;
     FMessages: TStringList;
     FOutput: TStringList;
+  protected
+    function CloseFile: Boolean;
   public
+    property FileModified: Boolean read FFileModified;
+    property CodeModified: Boolean read FCodeModified;
     property FileName: String read FFileName;
     property Highlighter: TSynMflSyn read FHighlighter;
     property Options: TParserOptions read FOptions;
@@ -185,16 +197,26 @@ end;
 
 procedure TfmMain.acFileNewExecute(Sender: TObject);
 begin
-  edCode.Clear;
+  if CloseFile then
+  begin
+    edCode.Clear;
+    FFileModified := False;
+    FCodeModified := True;
+  end;
 end;
 
 procedure TfmMain.acFileOpenExecute(Sender: TObject);
 begin
-  FileOpenDialog.FileName := FileName;
-  if FileOpenDialog.Execute then
+  if CloseFile then
   begin
-    edCode.Lines.LoadFromFile(FileOpenDialog.FileName);
-    FFileName := FileOpenDialog.FileName;
+    FileOpenDialog.FileName := FileName;
+    if FileOpenDialog.Execute then
+    begin
+      edCode.Lines.LoadFromFile(FileOpenDialog.FileName);
+      FFileModified := False;
+      FCodeModified := True;
+      FFileName := FileOpenDialog.FileName;
+    end;
   end;
 end;
 
@@ -216,6 +238,8 @@ begin
   end else
   begin
     edCode.Lines.SaveToFile(FileName);
+    FFileModified := False;
+    FCodeModified := True;
   end;
 end;
 
@@ -229,6 +253,8 @@ begin
     FOptions.Free;
     FOptions := LfmOptions.Options;
     FStandardPackages := LfmOptions.StandardPackages;
+    FFileModified := True;
+    FCodeModified := True;
   end;
 end;
 
@@ -352,6 +378,30 @@ begin
   spLog.Hide;
 end;
 
+function TfmMain.CloseFile: Boolean;
+begin
+  if FileModified then
+  begin
+    case MessageDlg('Save changes?', mtConfirmation, mbYesNoCancel, 0, mbCancel) of
+      mrYes:
+        begin
+          acFileSave.Execute;
+        end;
+      mrCancel:
+        begin
+          Exit(False);
+        end;
+    end;
+  end;
+  Result := True;
+end;
+
+procedure TfmMain.edCodeChange(Sender: TObject);
+begin
+  FFileModified := True;
+  FCodeModified := True;
+end;
+
 procedure TfmMain.FormCreate(Sender: TObject);
 begin
   FHighlighter := TSynMflSyn.Create(nil);
@@ -360,6 +410,7 @@ begin
   FMessages := TStringList.Create;
   FOutput := TStringList.Create;
   edCode.Highlighter := Highlighter;
+  acFileNew.Execute;
 end;
 
 procedure TfmMain.FormDestroy(Sender: TObject);
@@ -367,6 +418,148 @@ begin
   FOptions.Free;
   FHighlighter.Free;
   edCode.Highlighter := Default(TSynMflSyn);
+end;
+
+procedure TfmMain.SynCompletionProposalExecute(Kind: SynCompletionType;
+  Sender: TObject; var CurrentInput: string; var x, y: Integer;
+  var CanExecute: Boolean);
+
+  function HighlightItem(const AItem: String): String;
+  var
+    LLexer: TParserLexer;
+    LToken: TParserToken;
+    LBuilder: TStringBuilder;
+
+    procedure BuildAttributeString(const AAttribute: TSynHighlighterAttributes);
+    const
+      LColor = '\color{%s}';
+      LStyle = '\style{%s}';
+      LStyleOption: array [Boolean] of String = (
+        '-%s', '+%s'
+      );
+    begin
+      LBuilder.AppendFormat(LColor, [ColorToString(AAttribute.Foreground)]);
+      LBuilder.AppendFormat(LStyle, [String.Format(LStyleOption[fsBold in AAttribute.Style], ['B'])]);
+      LBuilder.AppendFormat(LStyle, [String.Format(LStyleOption[fsItalic in AAttribute.Style], ['I'])]);
+      LBuilder.AppendFormat(LStyle, [String.Format(LStyleOption[fsUnderline in AAttribute.Style], ['U'])]);
+      LBuilder.AppendFormat(LStyle, [String.Format(LStyleOption[fsStrikeOut in AAttribute.Style], ['S'])]);
+    end;
+
+  begin
+    LBuilder := TStringBuilder.Create;
+    try
+      LLexer := TParserLexer.Create(AItem);
+      try
+        repeat
+          LToken := LLexer.NextToken[False];
+          if LToken.Kind <> tkEnd then
+          begin
+            case LToken.Kind of
+              tkSymbolOp, tkSymbolRef, tkSymbolHash, tkSymbolEq, tkSymbolColon, tkSymbolDot, tkSymbolComma, tkSymbolAmp, tkSymbolParOp, tkSymbolParCl, tkSymbolBrackOp, tkSymbolBrackCl, tkSymbolBraceOp, tkSymbolBraceCl, tkSymbolAbs:
+                begin
+                  BuildAttributeString(Highlighter.SymbolAttri);
+                end;
+              tkNumberDec:
+                begin
+                  BuildAttributeString(Highlighter.NumberDecAttri);
+                end;
+              tkNumberHex:
+                begin
+                  BuildAttributeString(Highlighter.NumberHexAttri);
+                end;
+              tkText:
+                begin
+                  BuildAttributeString(Highlighter.StringAttribute);
+                end;
+              tkName:
+                begin
+                  if LToken.Keyword = kwNone then
+                  begin
+                    BuildAttributeString(Highlighter.IdentifierAttri);
+                  end else
+                  begin
+                    BuildAttributeString(Highlighter.KeywordAttri);
+                  end;
+                end;
+            end;
+//            if ((LToken.Kind = tkSymbolOp) and (LLexer.NextToken[True].Kind in [tkNumberDec, tkName)) or ((LToken.Kind = tkSymbolOp) and ) then
+
+            LBuilder.Append(LToken.ToString);
+//            if LToken.Kind in [tkSymbolOp, tkSymbolEq, tkSymbolColon, tkSymbolComma, tkSymbolAmp, tkSymbolParCl, tkSymbolBrackCl, tkSymbolBraceCl, tkSymbolAbs, tkNumberDec, tkNumberHex, tkText, tkName] and not (LLexer.NextToken[True] in []) then
+            begin
+//              LBuilder.Append(#32);
+            end;
+          end;
+        until LToken.Kind = tkEnd;
+      finally
+        LLexer.Free;
+      end;
+      Result := LBuilder.ToString.TrimRight;
+    finally
+      LBuilder.Free;
+    end;
+  end;
+
+var
+  LParser: TParser;
+  LIndex: Integer;
+  LExporter: TParserExporter;
+  LExportTarget: TStringList;
+  LObject: TParserObject;
+  LStandardPackage: TParserStandardPackage;
+begin
+  if CodeModified then
+  begin
+    LParser := TParser.Create;
+    try
+      LParser.Options.Assign(Options);
+      LParser.StandardPackages := StandardPackages;
+      for LIndex := 0 to Pred(edCode.CaretY) do
+      begin
+        try
+          LParser.Evaluate(edCode.Lines[LIndex]);
+        except
+          Continue;
+        end;
+      end;
+      SynCompletionProposal.ClearList;
+      LExportTarget := TStringList.Create;
+      try
+        LExporter := TParserCodeExporter.Create(LExportTarget);
+        try
+          LExporter.Export(LParser.Dictionary);
+          for LObject in LParser.Dictionary do
+          begin
+            for LIndex := 0 to Pred(LExporter.Export(LObject)) do
+            begin
+              SynCompletionProposal.ItemList.Add(HighlightItem(LExportTarget[LIndex]));
+              SynCompletionProposal.InsertList.Add(LObject.Name);
+            end;
+            LExportTarget.Clear;
+          end;
+          for LStandardPackage in StandardPackages do
+          begin
+            for LObject in TParserStandardPackageProvider[LStandardPackage].Dictionary do
+            begin
+              for LIndex := 0 to Pred(LExporter.Export(LObject)) do
+              begin
+                SynCompletionProposal.ItemList.Add(HighlightItem(LExportTarget[LIndex]));
+                SynCompletionProposal.InsertList.Add(LObject.Name);
+              end;
+            end;
+            LExportTarget.Clear;
+          end;
+        finally
+          LExporter.Free;
+        end;
+      finally
+        LExportTarget.Free;
+      end;
+      FCodeModified := False;
+    finally
+      LParser.Free;
+    end;
+  end;
 end;
 
 procedure TfmMain.tcLogChange(Sender: TObject);

@@ -107,6 +107,14 @@ type
     procedure SetValue(const AValue: TParserValue); virtual;
   end;
 
+  TParserVariableDelegate = class(TParserObjectDelegate<TParserVariable>, IParserWritableObject)
+  private
+    function GetDelegation: IParserWritableObject;
+  public
+    property Delegation: IParserWritableObject read GetDelegation implements IParserWritableObject;
+    constructor Create(const AValue: TParserValue);
+  end;
+
   TParserParamOption = (poType, poDefault);
 
   TParserParamOptions = set of TParserParamOption;
@@ -605,6 +613,18 @@ end;
 procedure TParserVariable.SetValue(const AValue: TParserValue);
 begin
   FValue := AValue;
+end;
+
+{ TParserVariableDelegate }
+
+constructor TParserVariableDelegate.Create(const AValue: TParserValue);
+begin
+  inherited Create(TParserVariable.Create(String.Empty, AValue));
+end;
+
+function TParserVariableDelegate.GetDelegation: IParserWritableObject;
+begin
+  Result := FObject;
 end;
 
 { TParserParam }
@@ -1564,7 +1584,7 @@ function TParserRecordType.GetSupported(const AValue: TParserValue): Boolean;
 var
   LValue: TParserValue;
 begin
-  if (AValue.Kind = vkRecord) and (AValue.Count = FieldCount) then
+  if (AValue.Kind = vkRecord) and ((AValue.Count = FieldCount) or (FieldCount = 0)) then
   begin
     for LValue in Self do
     begin
